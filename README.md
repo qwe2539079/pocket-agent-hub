@@ -64,9 +64,18 @@ npm test
 npm run dev
 ```
 
+## Feishu Transport Strategy
+
+The Feishu channel now supports two transport modes:
+
+- `websocket`: primary mode, aligned with the long-connection approach used by the reference repositories
+- `webhook`: fallback mode when you intentionally expose a public callback endpoint
+
+The default sample configuration now uses `websocket`, so the workstation initiates the outbound connection itself instead of waiting for Feishu to call back in.
+
 ## Feishu Local Setup
 
-The repository now supports a private local override file:
+The repository supports a private local override file:
 
 - tracked template: `config/app.config.local.example.json`
 - private runtime file: `config/app.config.local.json`
@@ -81,24 +90,16 @@ Then edit `config/app.config.local.json` and fill:
 
 - `channels.feishu.appId`
 - `channels.feishu.appSecret`
-- `channels.feishu.verificationToken`
+- optionally adjust `channels.feishu.websocketUrl`
 
-Start the local webhook service with:
+Start the local service with:
 
 ```bash
 npm run dev:local
 ```
 
-By default the service listens on:
-
-- `http://0.0.0.0:8787/feishu/events`
-- `http://127.0.0.1:8787/healthz`
-
-Important constraints for real-device testing:
-
-- Feishu must be configured to call a public HTTPS callback URL
-- this workstation currently only has local/LAN addresses, so a tunnel or public reverse proxy is still required for real callback delivery
-- the private local config file is gitignored and will not be pushed
+If you keep `mode: "websocket"`, the host only needs outbound network access.
+If you switch to `mode: "webhook"`, you will still need a public HTTPS callback URL.
 
 ## License
 

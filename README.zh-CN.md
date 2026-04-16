@@ -70,9 +70,18 @@ npm test
 npm run dev
 ```
 
+## 飞书传输策略
+
+飞书通道现在支持两种传输模式：
+
+- `websocket`：主模式，对齐你给的参考仓库所采用的长连接路线
+- `webhook`：回退模式，仅在你明确暴露公网回调地址时使用
+
+现在默认示例配置已经切到 `websocket`，也就是由这台工作站主动向外建立连接，而不是等飞书从公网反向回调进来。
+
 ## 飞书本地配置
 
-仓库现在支持一层私有本地覆盖配置：
+仓库支持一层私有本地覆盖配置：
 
 - 可提交模板：`config/app.config.local.example.json`
 - 本机私有文件：`config/app.config.local.json`
@@ -83,11 +92,11 @@ npm run dev
 cp config/app.config.local.example.json config/app.config.local.json
 ```
 
-然后编辑 `config/app.config.local.json`，至少填这三项：
+然后编辑 `config/app.config.local.json`，至少填：
 
 - `channels.feishu.appId`
 - `channels.feishu.appSecret`
-- `channels.feishu.verificationToken`
+- 如有需要，调整 `channels.feishu.websocketUrl`
 
 本地启动命令：
 
@@ -95,16 +104,8 @@ cp config/app.config.local.example.json config/app.config.local.json
 npm run dev:local
 ```
 
-默认监听地址：
-
-- `http://0.0.0.0:8787/feishu/events`
-- `http://127.0.0.1:8787/healthz`
-
-真机联调要注意：
-
-- 飞书事件订阅必须回调到公网 `HTTPS` 地址
-- 这台机器当前只有本地/LAN 地址，所以若要让飞书真正打回调，还需要隧道或公网反向代理
-- `config/app.config.local.json` 已加入 `.gitignore`，不会被推送到 GitHub
+如果保持 `mode: "websocket"`，这台主机只需要能主动访问外网。
+如果切回 `mode: "webhook"`，则仍然需要公网 `HTTPS` 回调地址。
 
 ## 许可证
 

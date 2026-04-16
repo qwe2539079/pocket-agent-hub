@@ -3,14 +3,19 @@ export type AgentKind = "codex" | "claude" | "gemini";
 export type PersonaKind = "dev-control" | "daily-assistant";
 export type PolicyKind = "guarded-dev" | "safe-chat";
 
+export type FeishuTransportMode = "websocket" | "webhook";
+
 export interface FeishuChannelConfig {
   enabled: boolean;
   appId: string;
   appSecret: string;
-  mode: "webhook";
-  bindHost: string;
-  port: number;
-  path: string;
+  mode: FeishuTransportMode;
+  apiBaseUrl?: string;
+  websocketUrl?: string;
+  reconnectIntervalMs?: number;
+  bindHost?: string;
+  port?: number;
+  path?: string;
   verificationToken?: string;
 }
 

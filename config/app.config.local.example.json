@@ -6,10 +6,10 @@
       "enabled": true,
       "appId": "cli_xxxxxxxxxxxxx",
       "appSecret": "xxxxxxxxxxxxxxxx",
-      "verificationToken": "xxxxxxxxxxxxxxxx",
-      "bindHost": "0.0.0.0",
-      "port": 8787,
-      "path": "/feishu/events"
+      "mode": "websocket",
+      "apiBaseUrl": "https://open.feishu.cn",
+      "websocketUrl": "wss://msg-frontier.feishu.cn/ws/v2",
+      "reconnectIntervalMs": 5000
     },
     "weixin": {
       "enabled": false

@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ClaudeAdapter } from "../src/agents/claude/adapter.js";
+import type { AppConfig } from "../src/config/types.js";
 import { ProjectRegistry } from "../src/core/project.js";
 import { HubRouter } from "../src/core/router.js";
 import { SessionRegistry } from "../src/core/session.js";
 import { PolicyEngine } from "../src/policies/policy-engine.js";
 import { AuditLog } from "../src/storage/audit-log.js";
 import { FileStore } from "../src/storage/file-store.js";
-import type { AppConfig } from "../src/config/types.js";
 
 function makeConfig(): AppConfig {
   return {
@@ -22,10 +22,10 @@ function makeConfig(): AppConfig {
         enabled: true,
         appId: "x",
         appSecret: "x",
-        mode: "webhook",
-        bindHost: "127.0.0.1",
-        port: 8787,
-        path: "/feishu/events",
+        mode: "websocket",
+        apiBaseUrl: "https://open.feishu.cn",
+        websocketUrl: "wss://msg-frontier.feishu.cn/ws/v2",
+        reconnectIntervalMs: 5000,
       },
       weixin: {
         enabled: true,

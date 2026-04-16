@@ -6,7 +6,10 @@
       "enabled": true,
       "appId": "replace-me",
       "appSecret": "replace-me",
-      "mode": "webhook",
+      "mode": "websocket",
+      "apiBaseUrl": "https://open.feishu.cn",
+      "websocketUrl": "wss://msg-frontier.feishu.cn/ws/v2",
+      "reconnectIntervalMs": 5000,
       "bindHost": "0.0.0.0",
       "port": 8787,
       "path": "/feishu/events",
@@ -59,5 +62,5 @@
       "description": "The scenic operations monorepo.",
       "defaultAgent": "codex"
     }
-  }
+  ]
 }

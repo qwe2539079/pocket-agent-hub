@@ -22,7 +22,10 @@ test("loadConfig merges a local override via extends", async () => {
             enabled: true,
             appId: "base-app-id",
             appSecret: "base-secret",
-            mode: "webhook",
+            mode: "websocket",
+            apiBaseUrl: "https://open.feishu.cn",
+            websocketUrl: "wss://msg-frontier.feishu.cn/ws/v2",
+            reconnectIntervalMs: 5000,
             bindHost: "127.0.0.1",
             port: 8787,
             path: "/feishu/events",
@@ -87,9 +90,10 @@ test("loadConfig merges a local override via extends", async () => {
   const config = await loadConfig(localPath);
 
   assert.equal(config.hostId, "base-host");
+  assert.equal(config.channels.feishu.mode, "websocket");
   assert.equal(config.channels.feishu.appId, "local-app-id");
   assert.equal(config.channels.feishu.appSecret, "local-secret");
-  assert.equal(config.channels.feishu.path, "/feishu/events");
+  assert.equal(config.channels.feishu.websocketUrl, "wss://msg-frontier.feishu.cn/ws/v2");
   assert.equal(config.channels.weixin.enabled, false);
   assert.equal(config.projects[0]?.id, "pocket-agent-hub");
 });
