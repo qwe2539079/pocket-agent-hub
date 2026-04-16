@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx src/index.ts",
+    "dev:local": "tsx src/index.ts ./config/app.config.local.json",
     "test": "node --test --import tsx"
   },
   "engines": {

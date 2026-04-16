@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import type { AppConfig } from "./types.js";
 
@@ -7,13 +7,51 @@ const requiredChannels = ["feishu", "weixin"] as const;
 const requiredAgents = ["codex", "claude", "gemini"] as const;
 const requiredPersonas = ["dev-control", "daily-assistant"] as const;
 
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonObject = { [key: string]: JsonValue };
+type ConfigSource = JsonObject & { extends?: string };
+
 export async function loadConfig(configPath: string): Promise<AppConfig> {
   const absolutePath = resolve(configPath);
-  const raw = await readFile(absolutePath, "utf8");
-  const parsed = JSON.parse(raw) as Partial<AppConfig>;
+  const parsed = (await loadConfigSource(absolutePath)) as Partial<AppConfig>;
 
   assertConfig(parsed, absolutePath);
   return parsed;
+}
+
+async function loadConfigSource(configPath: string): Promise<JsonObject> {
+  const raw = await readFile(configPath, "utf8");
+  const parsed = JSON.parse(raw) as ConfigSource;
+
+  if (!parsed.extends) {
+    return parsed;
+  }
+
+  const parentPath = resolve(dirname(configPath), parsed.extends);
+  const parentConfig = await loadConfigSource(parentPath);
+  const { extends: _extends, ...overlay } = parsed;
+
+  return mergeObjects(parentConfig, overlay);
+}
+
+function mergeObjects(base: JsonObject, overlay: JsonObject): JsonObject {
+  const result: JsonObject = { ...base };
+
+  for (const [key, value] of Object.entries(overlay)) {
+    const baseValue = result[key];
+    if (isPlainObject(baseValue) && isPlainObject(value)) {
+      result[key] = mergeObjects(baseValue, value);
+      continue;
+    }
+
+    result[key] = value;
+  }
+
+  return result;
+}
+
+function isPlainObject(value: JsonValue | undefined): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertConfig(config: Partial<AppConfig>, configPath: string): asserts config is AppConfig {

@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { ClaudeAdapter } from "../agents/claude/adapter.js";
@@ -15,8 +16,8 @@ import { PolicyEngine } from "../policies/policy-engine.js";
 import { AuditLog } from "../storage/audit-log.js";
 import { FileStore } from "../storage/file-store.js";
 
-export async function bootstrap(configPath = "./config/app.config.example.json"): Promise<void> {
-  const absoluteConfigPath = resolve(configPath);
+export async function bootstrap(configPath?: string): Promise<void> {
+  const absoluteConfigPath = resolve(configPath ?? (await resolveDefaultConfigPath()));
   const config = await loadConfig(absoluteConfigPath);
   const storageDir = resolve(dirname(absoluteConfigPath), config.storageDir);
   const fileStore = new FileStore(storageDir);
@@ -58,8 +59,24 @@ export async function bootstrap(configPath = "./config/app.config.example.json")
   });
 
   console.log(`[hub] started on ${config.hostId}`);
+  console.log(`[hub] config: ${absoluteConfigPath}`);
   console.log(`[hub] storage: ${storageDir}`);
   console.log(`[hub] projects: ${projects.list().map((project) => project.id).join(", ")}`);
   console.log(`[hub] restored sessions: ${sessions.list().length}`);
   console.log(`[hub] warmup response: ${warmup.text}`);
+}
+
+async function resolveDefaultConfigPath(): Promise<string> {
+  const candidates = ["./config/app.config.local.json", "./config/app.config.example.json"];
+
+  for (const candidate of candidates) {
+    try {
+      await access(resolve(candidate));
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return "./config/app.config.example.json";
 }

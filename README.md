@@ -64,6 +64,42 @@ npm test
 npm run dev
 ```
 
+## Feishu Local Setup
+
+The repository now supports a private local override file:
+
+- tracked template: `config/app.config.local.example.json`
+- private runtime file: `config/app.config.local.json`
+
+Recommended flow:
+
+```bash
+cp config/app.config.local.example.json config/app.config.local.json
+```
+
+Then edit `config/app.config.local.json` and fill:
+
+- `channels.feishu.appId`
+- `channels.feishu.appSecret`
+- `channels.feishu.verificationToken`
+
+Start the local webhook service with:
+
+```bash
+npm run dev:local
+```
+
+By default the service listens on:
+
+- `http://0.0.0.0:8787/feishu/events`
+- `http://127.0.0.1:8787/healthz`
+
+Important constraints for real-device testing:
+
+- Feishu must be configured to call a public HTTPS callback URL
+- this workstation currently only has local/LAN addresses, so a tunnel or public reverse proxy is still required for real callback delivery
+- the private local config file is gitignored and will not be pushed
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](./LICENSE).

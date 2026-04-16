@@ -70,6 +70,42 @@ npm test
 npm run dev
 ```
 
+## 飞书本地配置
+
+仓库现在支持一层私有本地覆盖配置：
+
+- 可提交模板：`config/app.config.local.example.json`
+- 本机私有文件：`config/app.config.local.json`
+
+推荐操作：
+
+```bash
+cp config/app.config.local.example.json config/app.config.local.json
+```
+
+然后编辑 `config/app.config.local.json`，至少填这三项：
+
+- `channels.feishu.appId`
+- `channels.feishu.appSecret`
+- `channels.feishu.verificationToken`
+
+本地启动命令：
+
+```bash
+npm run dev:local
+```
+
+默认监听地址：
+
+- `http://0.0.0.0:8787/feishu/events`
+- `http://127.0.0.1:8787/healthz`
+
+真机联调要注意：
+
+- 飞书事件订阅必须回调到公网 `HTTPS` 地址
+- 这台机器当前只有本地/LAN 地址，所以若要让飞书真正打回调，还需要隧道或公网反向代理
+- `config/app.config.local.json` 已加入 `.gitignore`，不会被推送到 GitHub
+
 ## 许可证
 
 本项目使用 MIT License，详见 [LICENSE](./LICENSE)。

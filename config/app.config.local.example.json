@@ -1,0 +1,23 @@
+{
+  "extends": "./app.config.example.json",
+  "hostId": "ubuntu-dev-main",
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_xxxxxxxxxxxxx",
+      "appSecret": "xxxxxxxxxxxxxxxx",
+      "verificationToken": "xxxxxxxxxxxxxxxx",
+      "bindHost": "0.0.0.0",
+      "port": 8787,
+      "path": "/feishu/events"
+    },
+    "weixin": {
+      "enabled": false
+    }
+  },
+  "agents": {
+    "gemini": {
+      "enabled": false
+    }
+  }
+}

@@ -6,3 +6,4 @@ runtime
 coverage
 *.log
 docs/
+config/app.config.local.json
