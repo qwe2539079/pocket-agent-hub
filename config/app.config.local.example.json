@@ -18,6 +18,9 @@
   "agents": {
     "gemini": {
       "enabled": false
+    },
+    "codex": {
+      "sandboxMode": "danger-full-access"
     }
   }
 }

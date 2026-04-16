@@ -26,10 +26,13 @@ export interface WeixinChannelConfig {
   accountId: string;
 }
 
+export type AgentSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
 export interface AgentConfig {
   enabled: boolean;
   command: string;
   defaultProfile: string;
+  sandboxMode?: AgentSandboxMode;
 }
 
 export interface PersonaConfig {

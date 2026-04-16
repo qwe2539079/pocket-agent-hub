@@ -26,7 +26,8 @@
     "codex": {
       "enabled": true,
       "command": "codex",
-      "defaultProfile": "dev-main"
+      "defaultProfile": "dev-main",
+      "sandboxMode": "danger-full-access"
     },
     "claude": {
       "enabled": true,
@@ -41,11 +42,17 @@
   },
   "personas": {
     "dev-control": {
-      "allowedAgents": ["codex", "claude", "gemini"],
+      "allowedAgents": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
       "policy": "guarded-dev"
     },
     "daily-assistant": {
-      "allowedAgents": ["claude"],
+      "allowedAgents": [
+        "claude"
+      ],
       "policy": "safe-chat"
     }
   },

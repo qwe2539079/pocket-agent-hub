@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import * as Lark from "@larksuiteoapi/node-sdk";
+
 import type { FeishuChannelConfig } from "../../config/types.js";
 import type { HubRouter } from "../../core/router.js";
 import type { ChannelConnector } from "../../core/types.js";
@@ -10,20 +12,30 @@ import {
   parseFeishuMessage,
   renderFeishuReply,
   type FeishuEventEnvelope,
+  type ParsedFeishuMessage,
 } from "./protocol.js";
 
 interface FeishuTokenResponse {
   tenant_access_token?: string;
   app_access_token?: string;
   expire?: number;
-  code?: number;
-  msg?: string;
 }
 
-interface WebSocketLike {
-  readyState: number;
-  send(data: string): void;
-  addEventListener(event: string, listener: (event: unknown) => void): void;
+interface FeishuWsEvent {
+  sender?: {
+    sender_id?: {
+      open_id?: string;
+      union_id?: string;
+      user_id?: string;
+    };
+  };
+  message?: {
+    message_id?: string;
+    chat_id?: string;
+    message_type?: string;
+    content?: string;
+    create_time?: string;
+  };
 }
 
 export class FeishuConnector implements ChannelConnector {
@@ -60,7 +72,7 @@ abstract class FeishuBaseConnector implements ChannelConnector {
     return this.config.apiBaseUrl ?? "https://open.feishu.cn";
   }
 
-  protected async routeParsedMessage(parsed: ReturnType<typeof parseFeishuMessage>): Promise<string | null> {
+  protected async routeParsedMessage(parsed: ParsedFeishuMessage | null): Promise<string | null> {
     if (!parsed) {
       return null;
     }
@@ -121,7 +133,7 @@ abstract class FeishuBaseConnector implements ChannelConnector {
     const payload = (await response.json()) as FeishuTokenResponse;
     const token = payload.tenant_access_token ?? payload.app_access_token;
     if (!token) {
-      throw new Error(`Feishu auth returned no token: ${JSON.stringify(payload)}`);
+      throw new Error(`Feishu auth returned no token`);
     }
 
     this.#tokenCache = {
@@ -212,10 +224,8 @@ class FeishuWebhookConnector extends FeishuBaseConnector {
 }
 
 class FeishuWebSocketConnector extends FeishuBaseConnector {
-  #socket?: WebSocketLike;
+  #client?: Lark.WSClient;
   #started = false;
-  #reconnectTimer?: NodeJS.Timeout;
-  #connecting = false;
 
   async start(): Promise<void> {
     if (this.#started) {
@@ -223,137 +233,60 @@ class FeishuWebSocketConnector extends FeishuBaseConnector {
     }
 
     this.#started = true;
-    await this.connect();
-  }
-
-  private async connect(): Promise<void> {
-    if (this.#connecting) {
-      return;
-    }
-
-    const WebSocketCtor = (globalThis as unknown as { WebSocket?: new (url: string) => WebSocketLike }).WebSocket;
-    if (!WebSocketCtor) {
-      throw new Error("Global WebSocket is unavailable in this Node runtime");
-    }
-
-    this.#connecting = true;
-    const token = await this.getTenantAccessToken();
-    const baseUrl = this.config.websocketUrl ?? "wss://msg-frontier.feishu.cn/ws/v2";
-    const wsUrl = `${baseUrl}?app_access_token=${encodeURIComponent(token)}`;
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const socket = new WebSocketCtor(wsUrl);
-
-      socket.addEventListener("open", () => {
-        this.#socket = socket;
-        this.#connecting = false;
-        console.log(`[feishu] connected via websocket: ${baseUrl}`);
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
-      });
-
-      socket.addEventListener("message", (event) => {
-        void this.handleSocketMessage(event);
-      });
-
-      socket.addEventListener("error", () => {
-        if (!settled) {
-          settled = true;
-          this.#connecting = false;
-          reject(new Error("Feishu websocket connection failed"));
-        }
-      });
-
-      socket.addEventListener("close", () => {
-        this.#socket = undefined;
-        this.#connecting = false;
-        console.log("[feishu] websocket connection closed");
-        if (!settled) {
-          settled = true;
-          reject(new Error("Feishu websocket connection closed before ready"));
-        }
-        this.scheduleReconnect();
-      });
-    }).catch((error) => {
-      this.scheduleReconnect();
-      throw error;
+    this.#client = new Lark.WSClient({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+      loggerLevel: Lark.LoggerLevel.info,
+      autoReconnect: true,
     });
-  }
 
-  private async handleSocketMessage(event: unknown): Promise<void> {
-    const raw = extractSocketData(event);
-    if (!raw) {
-      return;
-    }
+    const eventDispatcher = new Lark.EventDispatcher({}).register({
+      "im.message.receive_v1": async (data: FeishuWsEvent) => {
+        const parsed = parseFeishuWsMessage(data);
+        const replyText = await this.routeParsedMessage(parsed);
+        if (parsed && replyText) {
+          await this.sendTextMessage(parsed.chatId, replyText);
+        }
+      },
+    });
 
-    let payload: FeishuEventEnvelope & { type?: string; action?: string; message_id?: string };
-    try {
-      payload = JSON.parse(raw) as FeishuEventEnvelope & { type?: string; action?: string; message_id?: string };
-    } catch {
-      return;
-    }
-
-    if (payload.type === "ping" || payload.action === "ping") {
-      this.sendSocketFrame({ type: "pong", message_id: payload.message_id });
-      return;
-    }
-
-    if (isChallengeEvent(payload)) {
-      this.sendSocketFrame({ challenge: payload.challenge });
-      return;
-    }
-
-    const parsed = parseFeishuMessage(payload);
-    const replyText = await this.routeParsedMessage(parsed);
-    if (parsed && replyText) {
-      await this.sendTextMessage(parsed.chatId, replyText);
-    }
-  }
-
-  private sendSocketFrame(frame: Record<string, unknown>): void {
-    if (!this.#socket || this.#socket.readyState !== 1) {
-      return;
-    }
-
-    this.#socket.send(JSON.stringify(frame));
-  }
-
-  private scheduleReconnect(): void {
-    if (!this.#started || this.#reconnectTimer) {
-      return;
-    }
-
-    const delay = this.config.reconnectIntervalMs ?? 5_000;
-    this.#reconnectTimer = setTimeout(() => {
-      this.#reconnectTimer = undefined;
-      void this.connect().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`[feishu] websocket reconnect failed: ${message}`);
-      });
-    }, delay);
+    await this.#client.start({ eventDispatcher });
+    console.log("[feishu] connected via official websocket client");
   }
 }
 
-function extractSocketData(event: unknown): string | null {
-  if (!event || typeof event !== "object") {
+function parseFeishuWsMessage(event: FeishuWsEvent): ParsedFeishuMessage | null {
+  const message = event.message;
+  if (!message || message.message_type !== "text" || !message.chat_id || !message.message_id || !message.content) {
     return null;
   }
 
-  const data = (event as { data?: unknown }).data;
-  if (typeof data === "string") {
-    return data;
+  const senderId =
+    event.sender?.sender_id?.open_id ??
+    event.sender?.sender_id?.user_id ??
+    event.sender?.sender_id?.union_id;
+
+  if (!senderId) {
+    return null;
   }
 
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf8");
+  let text = "";
+  try {
+    const parsedContent = JSON.parse(message.content) as { text?: string };
+    text = parsedContent.text?.trim() ?? "";
+  } catch {
+    return null;
   }
 
-  if (ArrayBuffer.isView(data)) {
-    return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  if (!text) {
+    return null;
   }
 
-  return null;
+  return {
+    eventId: message.message_id,
+    chatId: message.chat_id,
+    senderId,
+    text,
+    timestamp: message.create_time ?? new Date().toISOString(),
+  };
 }

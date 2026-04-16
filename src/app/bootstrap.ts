@@ -29,7 +29,7 @@ export async function bootstrap(configPath?: string): Promise<void> {
   const policyEngine = new PolicyEngine();
 
   const agents = new Map<AgentKind, AgentAdapter>([
-    ["codex", new CodexAdapter()],
+    ["codex", new CodexAdapter(config.agents.codex, projects, storageDir)],
     ["claude", new ClaudeAdapter()],
     ["gemini", new GeminiAdapter()],
   ]);
