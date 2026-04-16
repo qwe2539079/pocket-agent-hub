@@ -41,5 +41,19 @@
       "allowedAgents": ["claude"],
       "policy": "safe-chat"
     }
-  }
+  },
+  "projects": [
+    {
+      "id": "pocket-agent-hub",
+      "path": "/home/cwl/Project/Github/pocket-agent-hub",
+      "description": "The mobile agent hub repository.",
+      "defaultAgent": "codex"
+    },
+    {
+      "id": "soms",
+      "path": "/home/cwl/Project/ltwl/travel/scenic_operations_management_system",
+      "description": "The scenic operations monorepo.",
+      "defaultAgent": "codex"
+    }
+  ]
 }

@@ -28,6 +28,13 @@ export interface PersonaConfig {
   policy: PolicyKind;
 }
 
+export interface ProjectConfig {
+  id: string;
+  path: string;
+  description: string;
+  defaultAgent: AgentKind;
+}
+
 export interface AppConfig {
   hostId: string;
   storageDir: string;
@@ -37,4 +44,5 @@ export interface AppConfig {
   };
   agents: Record<AgentKind, AgentConfig>;
   personas: Record<PersonaKind, PersonaConfig>;
+  projects: ProjectConfig[];
 }

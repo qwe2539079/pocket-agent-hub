@@ -54,4 +54,8 @@ function assertConfig(config: Partial<AppConfig>, configPath: string): asserts c
       throw new Error(`Missing persona config "${persona}" in ${configPath}`);
     }
   }
+
+  if (!config.projects || config.projects.length === 0) {
+    throw new Error(`Missing non-empty "projects" in ${configPath}`);
+  }
 }

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { ClaudeAdapter } from "../agents/claude/adapter.js";
 import { CodexAdapter } from "../agents/codex/adapter.js";
@@ -7,23 +7,33 @@ import { FeishuConnector } from "../channels/feishu/connector.js";
 import { WeixinConnector } from "../channels/weixin/connector.js";
 import { loadConfig } from "../config/load-config.js";
 import type { AgentKind } from "../config/types.js";
+import { ProjectRegistry } from "../core/project.js";
 import { HubRouter } from "../core/router.js";
 import { SessionRegistry } from "../core/session.js";
 import type { AgentAdapter, ChannelConnector } from "../core/types.js";
 import { PolicyEngine } from "../policies/policy-engine.js";
+import { AuditLog } from "../storage/audit-log.js";
+import { FileStore } from "../storage/file-store.js";
 
 export async function bootstrap(configPath = "./config/app.config.example.json"): Promise<void> {
-  const config = await loadConfig(resolve(configPath));
-  const sessions = new SessionRegistry();
+  const absoluteConfigPath = resolve(configPath);
+  const config = await loadConfig(absoluteConfigPath);
+  const storageDir = resolve(dirname(absoluteConfigPath), config.storageDir);
+  const fileStore = new FileStore(storageDir);
+  const sessions = new SessionRegistry(fileStore);
+  await sessions.hydrate();
+
+  const projects = new ProjectRegistry(config.projects);
+  const auditLog = new AuditLog(fileStore);
   const policyEngine = new PolicyEngine();
 
   const agents = new Map<AgentKind, AgentAdapter>([
     ["codex", new CodexAdapter()],
     ["claude", new ClaudeAdapter()],
-    ["gemini", new GeminiAdapter()]
+    ["gemini", new GeminiAdapter()],
   ]);
 
-  const router = new HubRouter(config, policyEngine, agents, sessions);
+  const router = new HubRouter(config, policyEngine, agents, sessions, projects, auditLog);
   const connectors: ChannelConnector[] = [];
 
   if (config.channels.feishu.enabled) {
@@ -43,9 +53,12 @@ export async function bootstrap(configPath = "./config/app.config.example.json")
     persona: "daily-assistant",
     text: "Hub bootstrap completed.",
     targetAgent: "claude",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
   console.log(`[hub] started on ${config.hostId}`);
+  console.log(`[hub] storage: ${storageDir}`);
+  console.log(`[hub] projects: ${projects.list().map((project) => project.id).join(", ")}`);
+  console.log(`[hub] restored sessions: ${sessions.list().length}`);
   console.log(`[hub] warmup response: ${warmup.text}`);
 }

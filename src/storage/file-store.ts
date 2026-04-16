@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 export class FileStore {
@@ -23,6 +23,12 @@ export class FileStore {
 
       throw error;
     }
+  }
+
+  async appendJsonLine(relativePath: string, value: unknown): Promise<void> {
+    const fullPath = resolve(this.baseDir, relativePath);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await appendFile(fullPath, `${JSON.stringify(value)}\n`, "utf8");
   }
 }
 
