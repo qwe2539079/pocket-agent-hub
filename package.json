@@ -1,0 +1,22 @@
+{
+  "name": "pocket-agent-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A long-running mobile bridge for local coding agents and daily assistant workflows.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "test": "node --test --import tsx"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3"
+  }
+}

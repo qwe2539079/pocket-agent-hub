@@ -1,0 +1,45 @@
+{
+  "hostId": "ubuntu-dev-main",
+  "storageDir": "./runtime",
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "replace-me",
+      "appSecret": "replace-me",
+      "mode": "webhook"
+    },
+    "weixin": {
+      "enabled": true,
+      "gatewayBaseUrl": "http://127.0.0.1:3000",
+      "token": "replace-me",
+      "accountId": "replace-me"
+    }
+  },
+  "agents": {
+    "codex": {
+      "enabled": true,
+      "command": "codex",
+      "defaultProfile": "dev-main"
+    },
+    "claude": {
+      "enabled": true,
+      "command": "claude",
+      "defaultProfile": "dev-main"
+    },
+    "gemini": {
+      "enabled": false,
+      "command": "gemini",
+      "defaultProfile": "research"
+    }
+  },
+  "personas": {
+    "dev-control": {
+      "allowedAgents": ["codex", "claude", "gemini"],
+      "policy": "guarded-dev"
+    },
+    "daily-assistant": {
+      "allowedAgents": ["claude"],
+      "policy": "safe-chat"
+    }
+  }
+}
