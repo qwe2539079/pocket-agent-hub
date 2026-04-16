@@ -101,6 +101,31 @@ npm run dev:local
 If you keep `mode: "websocket"`, the host only needs outbound network access.
 If you switch to `mode: "webhook"`, you will still need a public HTTPS callback URL.
 
+## Feishu Codex Usage
+
+The current verified mobile workflow is `Feishu -> Codex -> automatic completion notification`.
+
+Use this format in Feishu to start a real Codex task:
+
+```text
+/dev /codex /project pocket-agent-hub <task description>
+```
+
+Use this format to check the latest task status manually:
+
+```text
+/dev /codex /project pocket-agent-hub 查看当前项目状态
+```
+
+Current behavior:
+
+- the first message starts a real background `codex exec` run on the workstation
+- Feishu returns an immediate `started task` response with a run id
+- you can query status manually while the task is still running
+- when the run completes or fails, Feishu now pushes the result back automatically
+
+A detailed Chinese operating guide is kept locally on the workstation at `docs/feishu-codex-guide.md`.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](./LICENSE).

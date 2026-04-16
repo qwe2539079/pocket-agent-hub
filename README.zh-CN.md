@@ -107,6 +107,31 @@ npm run dev:local
 如果保持 `mode: "websocket"`，这台主机只需要能主动访问外网。
 如果切回 `mode: "webhook"`，则仍然需要公网 `HTTPS` 回调地址。
 
+## 飞书中使用 Codex
+
+当前已经验证通过的主链路是：`飞书 -> Codex -> 自动完成通知`。
+
+在飞书里发起一个真实 `Codex` 任务，请使用：
+
+```text
+/dev /codex /project pocket-agent-hub <任务描述>
+```
+
+手动查询最近一次任务状态，请使用：
+
+```text
+/dev /codex /project pocket-agent-hub 查看当前项目状态
+```
+
+当前行为是：
+
+- 第一条消息会在本机后台启动真实 `codex exec`
+- 飞书会立即返回 `started task` 和本次运行编号
+- 任务运行过程中你可以手动查询状态
+- 任务完成或失败后，飞书会自动回推结果
+
+更完整的中文操作说明保留在本机 `docs/feishu-codex-guide.md`。
+
 ## 许可证
 
 本项目使用 MIT License，详见 [LICENSE](./LICENSE)。
