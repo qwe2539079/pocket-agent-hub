@@ -12,6 +12,7 @@ import { ProjectRegistry } from "../core/project.js";
 import { HubRouter } from "../core/router.js";
 import { SessionRegistry } from "../core/session.js";
 import type { AgentAdapter, ChannelConnector } from "../core/types.js";
+import { NotificationCenter } from "../notifications/notification-center.js";
 import { PolicyEngine } from "../policies/policy-engine.js";
 import { AuditLog } from "../storage/audit-log.js";
 import { FileStore } from "../storage/file-store.js";
@@ -27,9 +28,10 @@ export async function bootstrap(configPath?: string): Promise<void> {
   const projects = new ProjectRegistry(config.projects);
   const auditLog = new AuditLog(fileStore);
   const policyEngine = new PolicyEngine();
+  const notifications = new NotificationCenter();
 
   const agents = new Map<AgentKind, AgentAdapter>([
-    ["codex", new CodexAdapter(config.agents.codex, projects, storageDir)],
+    ["codex", new CodexAdapter(config.agents.codex, projects, storageDir, notifications)],
     ["claude", new ClaudeAdapter()],
     ["gemini", new GeminiAdapter()],
   ]);
@@ -38,7 +40,7 @@ export async function bootstrap(configPath?: string): Promise<void> {
   const connectors: ChannelConnector[] = [];
 
   if (config.channels.feishu.enabled) {
-    connectors.push(new FeishuConnector(config.channels.feishu, router));
+    connectors.push(new FeishuConnector(config.channels.feishu, router, notifications));
   }
 
   if (config.channels.weixin.enabled) {

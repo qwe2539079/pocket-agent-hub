@@ -3,14 +3,17 @@ import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import type { AgentConfig } from "../../config/types.js";
+import type { AgentConfig, ChannelKind } from "../../config/types.js";
 import { ProjectRegistry } from "../../core/project.js";
 import type { HubMessage, HubResponse } from "../../core/message.js";
 import type { AgentAdapter } from "../../core/types.js";
+import { NotificationCenter } from "../../notifications/notification-center.js";
 
 interface CodexRunRecord {
   id: string;
   sessionId: string;
+  channel: ChannelKind;
+  actorId: string;
   projectId: string;
   projectPath: string;
   prompt: string;
@@ -37,6 +40,7 @@ export class CodexAdapter implements AgentAdapter {
     private readonly config: AgentConfig,
     private readonly projects: ProjectRegistry,
     private readonly storageDir: string,
+    private readonly notifications: NotificationCenter,
   ) {}
 
   async handle(message: HubMessage): Promise<HubResponse> {
@@ -67,7 +71,7 @@ export class CodexAdapter implements AgentAdapter {
       };
     }
 
-    const run = await this.startRun(sessionId, project.id, project.path, message.text);
+    const run = await this.startRun(message.channel, message.senderId, sessionId, project.id, project.path, message.text);
 
     return {
       sessionId,
@@ -81,6 +85,8 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   private async startRun(
+    channel: ChannelKind,
+    actorId: string,
     sessionId: string,
     projectId: string,
     projectPath: string,
@@ -97,6 +103,8 @@ export class CodexAdapter implements AgentAdapter {
     const run: CodexRunRecord = {
       id: runId,
       sessionId,
+      channel,
+      actorId,
       projectId,
       projectPath,
       prompt,
@@ -207,6 +215,21 @@ export class CodexAdapter implements AgentAdapter {
   private async finishRun(sessionId: string, run: CodexRunRecord): Promise<void> {
     await this.writeRun(run);
     await this.writeLatestRun(sessionId, run);
+    await this.notifyRunFinished(run);
+  }
+
+  private async notifyRunFinished(run: CodexRunRecord): Promise<void> {
+    const notificationText =
+      run.status === "completed"
+        ? `[codex] task completed.\nProject: ${run.projectId}\nRun: ${run.id}\n\n${run.finalMessage ?? "Codex finished, but no final message was captured."}`
+        : `[codex] task failed.\nProject: ${run.projectId}\nRun: ${run.id}\nError: ${run.errorMessage ?? `exit code ${run.exitCode ?? "unknown"}`}\n\n${await this.readLogTail(run.outputPath) || "No log output captured."}`;
+
+    try {
+      await this.notifications.notifyActor(run.channel, run.actorId, notificationText);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[codex] failed to send completion notification: ${message}`);
+    }
   }
 
   private async renderStatus(

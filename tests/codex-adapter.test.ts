@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { CodexAdapter } from "../src/agents/codex/adapter.js";
 import { ProjectRegistry } from "../src/core/project.js";
 import type { HubMessage } from "../src/core/message.js";
+import { NotificationCenter } from "../src/notifications/notification-center.js";
 
 function makeMessage(overrides: Partial<HubMessage> = {}): HubMessage {
   return {
@@ -23,10 +24,12 @@ function makeMessage(overrides: Partial<HubMessage> = {}): HubMessage {
 
 test("CodexAdapter requires project context for execution", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-codex-missing-"));
+  const notifications = new NotificationCenter();
   const adapter = new CodexAdapter(
     { enabled: true, command: "/bin/true", defaultProfile: "missing", sandboxMode: "danger-full-access" },
     new ProjectRegistry([]),
     dir,
+    notifications,
   );
 
   const response = await adapter.handle(makeMessage({ projectId: undefined, text: "请帮我修改 README" }));
@@ -40,6 +43,12 @@ test("CodexAdapter starts a run and later returns the completed summary", async 
   const projectDir = join(dir, "repo");
   await mkdir(projectDir, { recursive: true });
   const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const pushed: string[] = [];
+  notifications.registerChannelHandler("feishu", async (_targetId, text) => {
+    pushed.push(text);
+  });
+  notifications.rememberTarget("feishu", "user-1", "chat-1");
 
   const adapter = new CodexAdapter(
     { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
@@ -47,6 +56,7 @@ test("CodexAdapter starts a run and later returns the completed summary", async 
       { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
     ]),
     dir,
+    notifications,
   );
 
   const start = await adapter.handle(makeMessage({ text: "帮我总结当前仓库状态" }));
@@ -64,6 +74,8 @@ test("CodexAdapter starts a run and later returns the completed summary", async 
   const done = await adapter.handle(makeMessage({ text: "查看当前项目状态" }));
   assert.match(done.text, /last task completed/);
   assert.match(done.text, /fake codex summary: 帮我总结当前仓库状态/);
+  assert.equal(pushed.length, 1);
+  assert.match(pushed[0] ?? "", /task completed/);
 });
 
 test("CodexAdapter surfaces failed run logs in status output", async () => {
@@ -71,6 +83,12 @@ test("CodexAdapter surfaces failed run logs in status output", async () => {
   const projectDir = join(dir, "repo");
   await mkdir(projectDir, { recursive: true });
   const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const pushed: string[] = [];
+  notifications.registerChannelHandler("feishu", async (_targetId, text) => {
+    pushed.push(text);
+  });
+  notifications.rememberTarget("feishu", "user-1", "chat-1");
 
   const adapter = new CodexAdapter(
     { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
@@ -78,6 +96,7 @@ test("CodexAdapter surfaces failed run logs in status output", async () => {
       { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
     ]),
     dir,
+    notifications,
   );
 
   await adapter.handle(makeMessage({ text: "FAIL 请模拟失败任务" }));
@@ -91,6 +110,8 @@ test("CodexAdapter surfaces failed run logs in status output", async () => {
   const failed = await adapter.handle(makeMessage({ text: "查看当前项目状态" }));
   assert.match(failed.text, /last task failed/);
   assert.match(failed.text, /simulated codex failure/);
+  assert.equal(pushed.length, 1);
+  assert.match(pushed[0] ?? "", /task failed/);
 });
 
 async function writeFakeCodex(baseDir: string): Promise<string> {

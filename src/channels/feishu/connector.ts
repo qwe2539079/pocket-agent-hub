@@ -5,6 +5,7 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import type { FeishuChannelConfig } from "../../config/types.js";
 import type { HubRouter } from "../../core/router.js";
 import type { ChannelConnector } from "../../core/types.js";
+import { NotificationCenter } from "../../notifications/notification-center.js";
 import {
   assertVerificationToken,
   buildHubMessage,
@@ -45,11 +46,12 @@ export class FeishuConnector implements ChannelConnector {
   constructor(
     private readonly config: FeishuChannelConfig,
     router: HubRouter,
+    notifications: NotificationCenter,
   ) {
     this.#transport =
       config.mode === "websocket"
-        ? new FeishuWebSocketConnector(config, router)
-        : new FeishuWebhookConnector(config, router);
+        ? new FeishuWebSocketConnector(config, router, notifications)
+        : new FeishuWebhookConnector(config, router, notifications);
   }
 
   async start(): Promise<void> {
@@ -64,7 +66,12 @@ abstract class FeishuBaseConnector implements ChannelConnector {
   constructor(
     protected readonly config: FeishuChannelConfig,
     protected readonly router: HubRouter,
-  ) {}
+    protected readonly notifications: NotificationCenter,
+  ) {
+    this.notifications.registerChannelHandler(this.id, async (targetId, text) => {
+      await this.sendTextMessage(targetId, text);
+    });
+  }
 
   abstract start(): Promise<void>;
 
@@ -76,6 +83,8 @@ abstract class FeishuBaseConnector implements ChannelConnector {
     if (!parsed) {
       return null;
     }
+
+    this.notifications.rememberTarget(this.id, parsed.senderId, parsed.chatId);
 
     try {
       const hubMessage = buildHubMessage(parsed);
