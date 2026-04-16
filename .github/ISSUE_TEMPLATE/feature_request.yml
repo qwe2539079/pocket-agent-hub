@@ -1,0 +1,26 @@
+name: Feature request
+description: 提交一个功能建议
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 需求背景
+      description: 说明当前遇到的问题或缺口
+      placeholder: 这里填写为什么需要这个功能
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 说明你期待的行为或交互方式
+      placeholder: 这里填写建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案
+      description: 说明是否考虑过其他做法，以及为什么不合适

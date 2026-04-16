@@ -1,6 +1,8 @@
 # Pocket Agent Hub
 
-`Pocket Agent Hub` is a local-first control plane for a permanently-on Ubuntu workstation. It exposes coding agents and a daily assistant through mobile chat channels instead of remote desktop tools.
+[简体中文](./README.zh-CN.md)
+
+Pocket Agent Hub is a local-first control plane for a permanently-on Ubuntu workstation. It exposes coding agents and a daily assistant through mobile chat channels instead of remote desktop tools.
 
 ## Why This Exists
 
@@ -9,7 +11,7 @@ The target workflow is specific:
 - the main Ubuntu workstation stays on for long periods
 - real work happens locally with `Codex`, `Claude Code`, and later `Gemini`
 - the user often needs to leave the desk and continue from a phone
-- the phone should act as a natural chat entry point, not a remote desktop session
+- the phone should act as a natural chat entry point instead of a remote desktop session
 
 The project is inspired by:
 
@@ -17,30 +19,20 @@ The project is inspired by:
 - [`cc-connect`](https://github.com/chenhg5/cc-connect)
 - [`Claude-to-IM-skill`](https://github.com/op7418/Claude-to-IM-skill)
 
-It is not a direct fork of those repositories. The goal is a more opinionated product for one permanently-on personal workstation with two phone channels: `Feishu` and personal `WeChat`.
+It is not a direct fork of those repositories. The goal is a more opinionated product for one permanently-on personal workstation with two mobile channels: `Feishu` and personal `WeChat`.
 
 ## Current Status
 
-The repository currently contains a validated scaffold and formal planning baseline. Runtime features are intentionally incomplete until the planning documents are treated as the source of truth.
-
-## Planning Baseline
-
-Start here before implementing features:
-
-- [PRD](./docs/product-prd.md)
-- [System Design](./docs/system-design.md)
-- [Security Model](./docs/security-model.md)
-- [Channel Strategy](./docs/channel-strategy.md)
-- [Roadmap](./docs/roadmap.md)
+The repository currently contains a validated scaffold plus the repository baseline needed for long-term maintenance. Runtime features are intentionally incomplete and will continue to follow the product and system decisions documented locally on the workstation.
 
 ## Working Model
 
-The product is organized around two personas.
+The product is organized around two personas:
 
 - `dev-control`: phone-driven continuation of real development tasks with policy gates
 - `daily-assistant`: low-risk assistant behavior for chat, summaries, writing, and research
 
-The architecture is organized into five layers.
+The architecture is organized into five layers:
 
 - `channels/`: Feishu and WeChat transport adapters
 - `core/`: canonical messages, sessions, routing, task state
@@ -51,11 +43,17 @@ The architecture is organized into five layers.
 ## Repository Layout
 
 ```text
+.github/
 config/
-docs/
 src/
 tests/
 ```
+
+## Documentation Policy
+
+- English is the default language for `README.md`
+- Chinese documentation is available from [README.zh-CN.md](./README.zh-CN.md)
+- local planning and detailed notes may exist on the workstation, but the `docs/` directory is not part of the published repository
 
 ## Local Development
 
@@ -65,3 +63,7 @@ npm run check
 npm test
 npm run dev
 ```
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE).

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 中文使用说明
+    url: https://github.com/qwe2539079/pocket-agent-hub/blob/main/README.zh-CN.md
+    about: 先查看中文说明，再提交 issue

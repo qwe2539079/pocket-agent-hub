@@ -5,3 +5,4 @@ dist
 runtime
 coverage
 *.log
+docs/

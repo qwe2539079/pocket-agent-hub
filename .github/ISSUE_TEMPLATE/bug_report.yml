@@ -1,0 +1,35 @@
+name: Bug report
+description: 报告一个可复现的问题
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 简明描述问题现象与预期行为
+      placeholder: 这里填写问题描述
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序填写复现方式
+      placeholder: |
+        1. 打开 ...
+        2. 执行 ...
+        3. 观察 ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: 填写系统、Node、相关 agent 或通道信息
+      placeholder: Ubuntu 24.04 / Node 22 / Zed / Neovim / Codex ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 如有日志、报错、截图，请贴在这里
