@@ -37,7 +37,7 @@ export async function bootstrap(configPath = "./config/app.config.example.json")
   const connectors: ChannelConnector[] = [];
 
   if (config.channels.feishu.enabled) {
-    connectors.push(new FeishuConnector());
+    connectors.push(new FeishuConnector(config.channels.feishu, router));
   }
 
   if (config.channels.weixin.enabled) {
@@ -53,6 +53,7 @@ export async function bootstrap(configPath = "./config/app.config.example.json")
     persona: "daily-assistant",
     text: "Hub bootstrap completed.",
     targetAgent: "claude",
+    projectId: "pocket-agent-hub",
     timestamp: new Date().toISOString(),
   });
 

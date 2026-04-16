@@ -8,6 +8,10 @@ export interface FeishuChannelConfig {
   appId: string;
   appSecret: string;
   mode: "webhook";
+  bindHost: string;
+  port: number;
+  path: string;
+  verificationToken?: string;
 }
 
 export interface WeixinChannelConfig {

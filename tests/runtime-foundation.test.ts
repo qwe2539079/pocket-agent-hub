@@ -23,6 +23,9 @@ function makeConfig(): AppConfig {
         appId: "x",
         appSecret: "x",
         mode: "webhook",
+        bindHost: "127.0.0.1",
+        port: 8787,
+        path: "/feishu/events",
       },
       weixin: {
         enabled: true,

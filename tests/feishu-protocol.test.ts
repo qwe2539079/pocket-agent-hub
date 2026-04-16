@@ -1,0 +1,65 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  assertVerificationToken,
+  buildHubMessage,
+  isChallengeEvent,
+  parseFeishuMessage,
+  renderFeishuReply,
+} from "../src/channels/feishu/protocol.js";
+
+test("challenge events are detected", () => {
+  assert.equal(isChallengeEvent({ challenge: "abc" }), true);
+  assert.equal(isChallengeEvent({}), false);
+});
+
+test("verification token is enforced when configured", () => {
+  assert.doesNotThrow(() => assertVerificationToken({ token: "ok" }, "ok"));
+  assert.throws(() => assertVerificationToken({ token: "bad" }, "ok"));
+});
+
+test("Feishu text event is converted into a hub message with commands", () => {
+  const parsed = parseFeishuMessage({
+    header: {
+      event_id: "evt-1",
+      event_type: "im.message.receive_v1",
+      create_time: "1713200000000",
+    },
+    event: {
+      sender: {
+        sender_id: {
+          open_id: "ou_test",
+        },
+      },
+      message: {
+        message_id: "om_1",
+        chat_id: "oc_1",
+        message_type: "text",
+        content: JSON.stringify({ text: "/dev /codex /project soms investigate failing tests" }),
+        create_time: "1713200000000",
+      },
+    },
+  });
+
+  assert.ok(parsed);
+  const message = buildHubMessage(parsed!);
+
+  assert.equal(message.channel, "feishu");
+  assert.equal(message.senderId, "ou_test");
+  assert.equal(message.persona, "dev-control");
+  assert.equal(message.targetAgent, "codex");
+  assert.equal(message.projectId, "soms");
+  assert.equal(message.text, "investigate failing tests");
+});
+
+test("Feishu reply text includes session id and approval note", () => {
+  const reply = renderFeishuReply({
+    sessionId: "claude:user-1",
+    text: "done",
+    requiresApproval: true,
+  });
+
+  assert.match(reply, /Session: claude:user-1/);
+  assert.match(reply, /Approval required/);
+});
