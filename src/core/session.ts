@@ -1,8 +1,11 @@
-import type { AgentKind, PersonaKind } from "../config/types.js";
+import type { AgentKind, ChannelKind, PersonaKind } from "../config/types.js";
 import type { FileStore } from "../storage/file-store.js";
 
 export interface SessionRecord {
   id: string;
+  channel: ChannelKind;
+  actorId: string;
+  conversationId?: string;
   agent: AgentKind;
   persona: PersonaKind;
   projectId?: string;
@@ -32,12 +35,48 @@ export class SessionRegistry {
   }
 
   async upsert(session: SessionRecord): Promise<void> {
-    this.#sessions.set(session.id, session);
+    const existing = this.#sessions.get(session.id);
+    this.#sessions.set(session.id, {
+      ...session,
+      createdAt: existing?.createdAt ?? session.createdAt,
+    });
     await this.persist();
   }
 
   get(sessionId: string): SessionRecord | undefined {
     return this.#sessions.get(sessionId);
+  }
+
+  getLatestForConversation(
+    channel: ChannelKind,
+    actorId: string,
+    conversationId?: string,
+  ): SessionRecord | undefined {
+    return this.list().find(
+      (session) =>
+        session.channel === channel &&
+        session.actorId === actorId &&
+        session.conversationId === conversationId,
+    );
+  }
+
+  getLatestByActor(channel: ChannelKind, actorId: string): SessionRecord | undefined {
+    return this.list().find((session) => session.channel === channel && session.actorId === actorId);
+  }
+
+  async clearConversation(
+    channel: ChannelKind,
+    actorId: string,
+    conversationId?: string,
+  ): Promise<SessionRecord | undefined> {
+    const session = this.getLatestForConversation(channel, actorId, conversationId);
+    if (!session) {
+      return undefined;
+    }
+
+    this.#sessions.delete(session.id);
+    await this.persist();
+    return session;
   }
 
   list(): SessionRecord[] {

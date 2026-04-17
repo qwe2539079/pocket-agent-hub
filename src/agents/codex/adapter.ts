@@ -14,6 +14,7 @@ interface CodexRunRecord {
   sessionId: string;
   channel: ChannelKind;
   actorId: string;
+  conversationId?: string;
   projectId: string;
   projectPath: string;
   prompt: string;
@@ -71,7 +72,18 @@ export class CodexAdapter implements AgentAdapter {
       };
     }
 
-    const run = await this.startRun(message.channel, message.senderId, sessionId, project.id, project.path, message.text);
+    const executionPrompt = this.buildExecutionPrompt(message, latestRun, project.id);
+
+    const run = await this.startRun(
+      message.channel,
+      message.senderId,
+      message.conversationId,
+      sessionId,
+      project.id,
+      project.path,
+      message.text,
+      executionPrompt,
+    );
 
     return {
       sessionId,
@@ -87,10 +99,12 @@ export class CodexAdapter implements AgentAdapter {
   private async startRun(
     channel: ChannelKind,
     actorId: string,
+    conversationId: string | undefined,
     sessionId: string,
     projectId: string,
     projectPath: string,
     prompt: string,
+    executionPrompt: string,
   ): Promise<CodexRunRecord> {
     const runId = `${Date.now()}`;
     const runDir = resolve(this.storageDir, "codex", sessionId, runId);
@@ -98,13 +112,14 @@ export class CodexAdapter implements AgentAdapter {
     const lastMessagePath = resolve(runDir, "last-message.txt");
     await mkdir(runDir, { recursive: true });
 
-    const args = await this.buildArgs(projectPath, lastMessagePath, prompt);
+    const args = await this.buildArgs(projectPath, lastMessagePath, executionPrompt);
     const now = new Date().toISOString();
     const run: CodexRunRecord = {
       id: runId,
       sessionId,
       channel,
       actorId,
+      conversationId,
       projectId,
       projectPath,
       prompt,
@@ -154,6 +169,28 @@ export class CodexAdapter implements AgentAdapter {
     });
 
     return run;
+  }
+
+  private buildExecutionPrompt(message: HubMessage, latestRun: CodexRunRecord | null, projectId: string): string {
+    if (message.hasDirectives || !latestRun) {
+      return message.text;
+    }
+
+    if (latestRun.projectId !== projectId || latestRun.status !== "completed" || !latestRun.finalMessage) {
+      return message.text;
+    }
+
+    return [
+      `You are continuing an existing mobile chat session for project "${projectId}".`,
+      "",
+      "Previous assistant reply:",
+      latestRun.finalMessage,
+      "",
+      "User follow-up:",
+      message.text,
+      "",
+      "Answer the follow-up directly. If the user asks to summarize, compress, translate, rewrite, or continue the previous answer, operate on the previous assistant reply above.",
+    ].join("\n");
   }
 
   private async buildArgs(projectPath: string, lastMessagePath: string, prompt: string): Promise<string[]> {
@@ -225,7 +262,13 @@ export class CodexAdapter implements AgentAdapter {
         : `[codex] task failed.\nProject: ${run.projectId}\nRun: ${run.id}\nError: ${run.errorMessage ?? `exit code ${run.exitCode ?? "unknown"}`}\n\n${await this.readLogTail(run.outputPath) || "No log output captured."}`;
 
     try {
-      await this.notifications.notifyActor(run.channel, run.actorId, notificationText);
+      await this.notifications.notifyActor(run.channel, run.actorId, notificationText, {
+        conversationId: run.conversationId,
+        signalText:
+          run.status === "completed"
+            ? `[codex] completed: ${run.projectId} · ${run.id}`
+            : `[codex] failed: ${run.projectId} · ${run.id}`,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[codex] failed to send completion notification: ${message}`);

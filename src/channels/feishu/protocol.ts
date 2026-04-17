@@ -1,5 +1,5 @@
 import type { AgentKind, PersonaKind } from "../../config/types.js";
-import type { HubMessage, HubResponse } from "../../core/message.js";
+import type { HubMessage, HubResponse, SessionCommand } from "../../core/message.js";
 
 interface FeishuSenderId {
   open_id?: string;
@@ -107,11 +107,14 @@ export function buildHubMessage(input: ParsedFeishuMessage): HubMessage {
     id: input.eventId,
     channel: "feishu",
     senderId: input.senderId,
+    conversationId: input.chatId,
     persona: command.persona,
     text: command.text,
     targetAgent: command.targetAgent,
     projectId: command.projectId,
     timestamp: normalizeTimestamp(input.timestamp),
+    hasDirectives: command.hasDirectives,
+    sessionCommand: command.sessionCommand,
   };
 }
 
@@ -128,44 +131,72 @@ function parseCommandText(input: string): {
   targetAgent?: AgentKind;
   projectId?: string;
   text: string;
+  hasDirectives: boolean;
+  sessionCommand?: SessionCommand;
 } {
   const tokens = input.trim().split(/\s+/);
   let persona: PersonaKind = "daily-assistant";
   let targetAgent: AgentKind | undefined;
   let projectId: string | undefined;
+  let sessionCommand: SessionCommand | undefined;
   const textTokens: string[] = [];
+  let hasDirectives = false;
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
 
     if (token === "/dev") {
+      hasDirectives = true;
       persona = "dev-control";
       continue;
     }
 
     if (token === "/daily") {
+      hasDirectives = true;
       persona = "daily-assistant";
       continue;
     }
 
     if (token === "/codex") {
+      hasDirectives = true;
       targetAgent = "codex";
       continue;
     }
 
     if (token === "/claude") {
+      hasDirectives = true;
       targetAgent = "claude";
       continue;
     }
 
     if (token === "/gemini") {
+      hasDirectives = true;
       targetAgent = "gemini";
       continue;
     }
 
     if (token === "/project" && tokens[index + 1]) {
+      hasDirectives = true;
       projectId = tokens[index + 1];
       index += 1;
+      continue;
+    }
+
+    if (token === "/current") {
+      hasDirectives = true;
+      sessionCommand = "show-current-session";
+      continue;
+    }
+
+    if (token === "/reset") {
+      hasDirectives = true;
+      sessionCommand = "reset-session";
+      continue;
+    }
+
+    if (token === "/new") {
+      hasDirectives = true;
+      sessionCommand = "new-session";
       continue;
     }
 
@@ -177,6 +208,8 @@ function parseCommandText(input: string): {
     targetAgent,
     projectId,
     text: textTokens.join(" ").trim() || input.trim(),
+    hasDirectives,
+    sessionCommand,
   };
 }
 

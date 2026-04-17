@@ -14,6 +14,7 @@ function makeMessage(overrides: Partial<HubMessage> = {}): HubMessage {
     id: "msg-1",
     channel: "feishu",
     senderId: "user-1",
+    conversationId: "chat-1",
     persona: "dev-control",
     text: "帮我检查当前状态",
     projectId: "demo",
@@ -74,8 +75,47 @@ test("CodexAdapter starts a run and later returns the completed summary", async 
   const done = await adapter.handle(makeMessage({ text: "查看当前项目状态" }));
   assert.match(done.text, /last task completed/);
   assert.match(done.text, /fake codex summary: 帮我总结当前仓库状态/);
-  assert.equal(pushed.length, 1);
+  assert.equal(pushed.length, 2);
   assert.match(pushed[0] ?? "", /task completed/);
+  assert.match(pushed[1] ?? "", /completed: demo/);
+});
+
+test("CodexAdapter uses the last completed reply as context for follow-up prompts", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-followup-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  await adapter.handle(makeMessage({ text: "先总结当前仓库状态", hasDirectives: true }));
+
+  const latestPath = join(dir, "codex", "codex:user-1", "latest.json");
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string };
+    return latest.status === "completed";
+  });
+
+  await adapter.handle(makeMessage({ text: "帮我再压缩成一句话", hasDirectives: false }));
+
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string, prompt: string };
+    return latest.status === "completed" && latest.prompt === "帮我再压缩成一句话";
+  });
+
+  const run = JSON.parse(await readFile(latestPath, "utf8"));
+  const lastArg = run.args[run.args.length - 1];
+  assert.match(lastArg, /Previous assistant reply:/);
+  assert.match(lastArg, /fake codex summary: 先总结当前仓库状态/);
+  assert.match(lastArg, /User follow-up:/);
+  assert.match(lastArg, /帮我再压缩成一句话/);
 });
 
 test("CodexAdapter surfaces failed run logs in status output", async () => {
@@ -110,8 +150,9 @@ test("CodexAdapter surfaces failed run logs in status output", async () => {
   const failed = await adapter.handle(makeMessage({ text: "查看当前项目状态" }));
   assert.match(failed.text, /last task failed/);
   assert.match(failed.text, /simulated codex failure/);
-  assert.equal(pushed.length, 1);
+  assert.equal(pushed.length, 2);
   assert.match(pushed[0] ?? "", /task failed/);
+  assert.match(pushed[1] ?? "", /failed: demo/);
 });
 
 async function writeFakeCodex(baseDir: string): Promise<string> {

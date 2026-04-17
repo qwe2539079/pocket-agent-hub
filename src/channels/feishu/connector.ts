@@ -84,7 +84,7 @@ abstract class FeishuBaseConnector implements ChannelConnector {
       return null;
     }
 
-    this.notifications.rememberTarget(this.id, parsed.senderId, parsed.chatId);
+    this.notifications.rememberTarget(this.id, parsed.senderId, parsed.chatId, parsed.chatId);
 
     try {
       const hubMessage = buildHubMessage(parsed);

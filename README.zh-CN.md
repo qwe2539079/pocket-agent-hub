@@ -129,8 +129,20 @@ npm run dev:local
 - 飞书会立即返回 `started task` 和本次运行编号
 - 任务运行过程中你可以手动查询状态
 - 任务完成或失败后，飞书会自动回推结果
+- 同一飞书会话中的后续消息默认会续接当前活跃 session
+- `/current` 可查看当前对话绑定的活跃 session
+- `/reset` 可清空当前对话绑定的活跃 session
+- `/new` 可强制下一次请求从新 session 开始，而不复用当前上下文
 
 更完整的中文操作说明保留在本机 `docs/feishu-codex-guide.md`。
+
+## 致谢
+
+本项目在设计上参考并吸收了以下仓库的思路，再结合“单人、单机、长期在线工作站”的目标做了重新实现：
+
+- [`claude-to-im-plus`](https://github.com/JiangJingC/claude-to-im-plus)：提供了 daemon bridge 与移动端持久接入的整体思路
+- [`cc-connect`](https://github.com/chenhg5/cc-connect)：提供了显式会话控制、会话隔离思路，以及更贴近 IM 使用方式的产品细节
+- [`Claude-to-IM-skill`](https://github.com/op7418/Claude-to-IM-skill)：提供了较早期的桥接工作流参考，帮助明确通道与智能体集成方向
 
 ## 许可证
 

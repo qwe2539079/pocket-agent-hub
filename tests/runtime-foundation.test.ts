@@ -35,7 +35,7 @@ function makeConfig(): AppConfig {
       },
     },
     agents: {
-      codex: { enabled: true, command: "codex", defaultProfile: "dev" },
+      codex: { enabled: true, command: "codex", defaultProfile: "dev", sandboxMode: "danger-full-access" },
       claude: { enabled: true, command: "claude", defaultProfile: "dev" },
       gemini: { enabled: false, command: "gemini", defaultProfile: "research" },
     },
@@ -67,6 +67,9 @@ test("session registry persists sessions to disk", async () => {
 
   await registry.upsert({
     id: "session-1",
+    channel: "feishu",
+    actorId: "user-1",
+    conversationId: "chat-1",
     agent: "claude",
     persona: "daily-assistant",
     projectId: "pocket-agent-hub",
@@ -79,6 +82,8 @@ test("session registry persists sessions to disk", async () => {
   await hydrated.hydrate();
 
   assert.equal(hydrated.get("session-1")?.summary, "hello");
+  assert.equal(hydrated.getLatestForConversation("feishu", "user-1", "chat-1")?.id, "session-1");
+  assert.equal(hydrated.getLatestByActor("feishu", "user-1")?.id, "session-1");
 });
 
 test("router rejects unknown projects and writes audit log for allowed routes", async () => {
@@ -100,11 +105,13 @@ test("router rejects unknown projects and writes audit log for allowed routes", 
       id: "bad-project",
       channel: "feishu",
       senderId: "user-1",
+      conversationId: "chat-1",
       persona: "daily-assistant",
       text: "hello",
       targetAgent: "claude",
       projectId: "missing-project",
       timestamp: new Date().toISOString(),
+      hasDirectives: true,
     }),
   );
 
@@ -112,14 +119,118 @@ test("router rejects unknown projects and writes audit log for allowed routes", 
     id: "good-project",
     channel: "feishu",
     senderId: "user-1",
+    conversationId: "chat-1",
     persona: "daily-assistant",
     text: "hello",
     targetAgent: "claude",
     projectId: "pocket-agent-hub",
     timestamp: new Date().toISOString(),
+    hasDirectives: true,
   });
 
   const raw = await readFile(join(dir, "audit/events.jsonl"), "utf8");
   assert.match(raw, /good-project/);
   assert.match(raw, /allowed/);
+});
+
+test("router continues the latest active session when follow-up text has no directives", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-followup-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const router = new HubRouter(
+    makeConfig(),
+    new PolicyEngine(),
+    new Map([["claude", new ClaudeAdapter()]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const first = await router.route({
+    id: "first",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "dev-control",
+    text: "说明一下这个项目是做什么的？",
+    targetAgent: "claude",
+    projectId: "pocket-agent-hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  const followup = await router.route({
+    id: "followup",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "可以",
+    timestamp: new Date().toISOString(),
+    hasDirectives: false,
+  });
+
+  assert.match(first.text, /received dev-control message/);
+  assert.match(followup.text, /received dev-control message: 可以/);
+  assert.equal(followup.sessionId, first.sessionId);
+});
+
+
+test("router supports current and reset session commands per conversation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-session-cmd-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const router = new HubRouter(
+    makeConfig(),
+    new PolicyEngine(),
+    new Map([["claude", new ClaudeAdapter()]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const first = await router.route({
+    id: "first",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "dev-control",
+    text: "说明一下这个项目是做什么的？",
+    targetAgent: "claude",
+    projectId: "pocket-agent-hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  const current = await router.route({
+    id: "current",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/current",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "show-current-session",
+  });
+
+  assert.match(current.text, /current session/);
+  assert.match(current.text, /Agent: claude/);
+
+  const reset = await router.route({
+    id: "reset",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/reset",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "reset-session",
+  });
+
+  assert.match(reset.text, /cleared active session/);
+  assert.equal(sessions.get(first.sessionId), undefined);
 });

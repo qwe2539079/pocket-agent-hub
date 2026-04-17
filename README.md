@@ -123,8 +123,20 @@ Current behavior:
 - Feishu returns an immediate `started task` response with a run id
 - you can query status manually while the task is still running
 - when the run completes or fails, Feishu now pushes the result back automatically
+- follow-up messages in the same Feishu chat continue the active session by default
+- `/current` shows the active session bound to the current conversation
+- `/reset` clears the active session for the current conversation
+- `/new` forces the next request to start fresh without reusing the last conversation session
 
 A detailed Chinese operating guide is kept locally on the workstation at `docs/feishu-codex-guide.md`.
+
+## Acknowledgements
+
+This project reuses ideas from the following repositories and adapts them to a local-first, single-workstation control plane:
+
+- [`claude-to-im-plus`](https://github.com/JiangJingC/claude-to-im-plus) for the daemon bridge pattern and persistent mobile access model
+- [`cc-connect`](https://github.com/chenhg5/cc-connect) for explicit session controls, conversation isolation ideas, and IM-oriented agent UX
+- [`Claude-to-IM-skill`](https://github.com/op7418/Claude-to-IM-skill) for the earlier bridge workflow that helped shape the channel-agent integration direction
 
 ## License
 
