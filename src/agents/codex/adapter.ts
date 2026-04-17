@@ -1,4 +1,4 @@
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import type { AgentConfig, ChannelKind } from "../../config/types.js";
 import { ProjectRegistry } from "../../core/project.js";
 import type { HubMessage, HubResponse } from "../../core/message.js";
-import type { AgentAdapter } from "../../core/types.js";
+import type { AgentAdapter, ListRunsOptions, RunSummary } from "../../core/types.js";
 import { NotificationCenter } from "../../notifications/notification-center.js";
 
 interface CodexRunRecord {
@@ -30,6 +30,11 @@ interface CodexRunRecord {
   lastMessagePath: string;
   finalMessage?: string;
   errorMessage?: string;
+}
+
+interface CurrentRunPointer {
+  runId: string;
+  setAt: string;
 }
 
 export class CodexAdapter implements AgentAdapter {
@@ -72,7 +77,7 @@ export class CodexAdapter implements AgentAdapter {
       };
     }
 
-    const executionPrompt = this.buildExecutionPrompt(message, latestRun, project.id);
+    const executionPrompt = await this.buildExecutionPrompt(message, sessionId, latestRun, project.id);
 
     const run = await this.startRun(
       message.channel,
@@ -94,6 +99,86 @@ export class CodexAdapter implements AgentAdapter {
         `Use \`/dev /codex /project ${project.id} 查看当前项目状态\` to check progress.`,
       requiresApproval: false,
     };
+  }
+
+  async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+    const runs = await this.scanAllRuns();
+    const filtered = runs
+      .filter((run) => !options.actorId || run.actorId === options.actorId)
+      .filter((run) => !options.status || run.status === options.status)
+      .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+    const sliced = typeof options.limit === "number" ? filtered.slice(0, options.limit) : filtered;
+    return sliced.map((run) => toRunSummary(run));
+  }
+
+  async getRun(runId: string): Promise<RunSummary | null> {
+    const run = await this.readRunById(runId);
+    return run ? toRunSummary(run) : null;
+  }
+
+  async setCurrent(sessionId: string, runId: string): Promise<void> {
+    const run = await this.readRunById(runId);
+    if (!run) {
+      throw new Error(`Unknown codex run: ${runId}`);
+    }
+    if (run.sessionId !== sessionId) {
+      throw new Error(`Run ${runId} does not belong to session ${sessionId}`);
+    }
+    await this.writeJson(this.currentPath(sessionId), {
+      runId,
+      setAt: new Date().toISOString(),
+    } satisfies CurrentRunPointer);
+  }
+
+  async clearCurrent(sessionId: string): Promise<void> {
+    const path = this.currentPath(sessionId);
+    try {
+      await rm(path);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  async reconcileZombieRuns(): Promise<number> {
+    const runs = await this.scanAllRuns();
+    let fixed = 0;
+    const now = new Date().toISOString();
+
+    for (const run of runs) {
+      if (run.status !== "running") continue;
+      if (!run.pid) continue;
+
+      let alive = true;
+      try {
+        process.kill(run.pid, 0);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") {
+          alive = false;
+        }
+      }
+      if (alive) continue;
+
+      const updated: CodexRunRecord = {
+        ...run,
+        status: "failed",
+        exitCode: run.exitCode ?? null,
+        completedAt: run.completedAt ?? now,
+        updatedAt: now,
+        errorMessage: run.errorMessage ?? "Interrupted: hub restarted while this run was active.",
+      };
+
+      await this.writeRun(updated);
+      const latest = await this.readLatestRun(run.sessionId);
+      if (latest && latest.id === run.id) {
+        await this.writeLatestRun(run.sessionId, updated);
+      }
+      fixed += 1;
+    }
+
+    return fixed;
   }
 
   private async startRun(
@@ -171,12 +256,33 @@ export class CodexAdapter implements AgentAdapter {
     return run;
   }
 
-  private buildExecutionPrompt(message: HubMessage, latestRun: CodexRunRecord | null, projectId: string): string {
-    if (message.hasDirectives || !latestRun) {
+  private async buildExecutionPrompt(
+    message: HubMessage,
+    sessionId: string,
+    latestRun: CodexRunRecord | null,
+    projectId: string,
+  ): Promise<string> {
+    if (message.hasDirectives) {
       return message.text;
     }
 
-    if (latestRun.projectId !== projectId || latestRun.status !== "completed" || !latestRun.finalMessage) {
+    let seed: CodexRunRecord | null = null;
+
+    const pointer = await this.readCurrent(sessionId);
+    if (pointer) {
+      const resumed = await this.readRunById(pointer.runId);
+      // /resume is one-shot: consume the pointer whether or not the run is usable
+      await this.clearCurrent(sessionId);
+      if (resumed) {
+        seed = resumed;
+      }
+    }
+
+    if (!seed) {
+      seed = latestRun;
+    }
+
+    if (!seed || seed.projectId !== projectId || seed.status !== "completed" || !seed.finalMessage) {
       return message.text;
     }
 
@@ -184,7 +290,7 @@ export class CodexAdapter implements AgentAdapter {
       `You are continuing an existing mobile chat session for project "${projectId}".`,
       "",
       "Previous assistant reply:",
-      latestRun.finalMessage,
+      seed.finalMessage,
       "",
       "User follow-up:",
       message.text,
@@ -329,6 +435,51 @@ export class CodexAdapter implements AgentAdapter {
     await this.writeJson(resolve(this.storageDir, "codex", run.sessionId, run.id, "run.json"), run);
   }
 
+  private async readCurrent(sessionId: string): Promise<CurrentRunPointer | null> {
+    return this.readJson<CurrentRunPointer>(this.currentPath(sessionId));
+  }
+
+  private currentPath(sessionId: string): string {
+    return resolve(this.storageDir, "codex", sessionId, "current.json");
+  }
+
+  private async readRunById(runId: string): Promise<CodexRunRecord | null> {
+    const all = await this.scanAllRuns();
+    return all.find((run) => run.id === runId) ?? null;
+  }
+
+  private async scanAllRuns(): Promise<CodexRunRecord[]> {
+    const base = resolve(this.storageDir, "codex");
+    let sessionNames: string[];
+    try {
+      const entries = await readdir(base, { withFileTypes: true });
+      sessionNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    } catch (error) {
+      if (isNotFoundError(error)) return [];
+      throw error;
+    }
+
+    const runs: CodexRunRecord[] = [];
+    for (const sessionName of sessionNames) {
+      const sessionPath = resolve(base, sessionName);
+      let runNames: string[];
+      try {
+        const entries = await readdir(sessionPath, { withFileTypes: true });
+        runNames = entries
+          .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+          .map((entry) => entry.name);
+      } catch {
+        continue;
+      }
+
+      for (const runName of runNames) {
+        const run = await this.readJson<CodexRunRecord>(resolve(sessionPath, runName, "run.json"));
+        if (run) runs.push(run);
+      }
+    }
+    return runs;
+  }
+
   private async writeJson(path: string, value: unknown): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
     const handle = await open(path, "w");
@@ -372,4 +523,44 @@ function isStatusQuery(text: string): boolean {
     "summarize current task",
     "summary",
   ].some((keyword) => normalized.includes(keyword.toLowerCase()));
+}
+
+function toRunSummary(run: CodexRunRecord): RunSummary {
+  const startedMs = Date.parse(run.startedAt);
+  const endedMs = run.completedAt ? Date.parse(run.completedAt) : undefined;
+  const durationMs =
+    endedMs !== undefined && !Number.isNaN(endedMs) && !Number.isNaN(startedMs)
+      ? endedMs - startedMs
+      : undefined;
+
+  const trimmed = run.finalMessage?.trim();
+  const preview = trimmed
+    ? trimmed.length > 80
+      ? `${trimmed.slice(0, 80)}…`
+      : trimmed
+    : undefined;
+
+  return {
+    runId: run.id,
+    agent: "codex",
+    sessionId: run.sessionId,
+    actorId: run.actorId,
+    channel: run.channel,
+    conversationId: run.conversationId,
+    projectId: run.projectId,
+    status: run.status,
+    prompt: run.prompt,
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    completedAt: run.completedAt,
+    durationMs,
+    exitCode: run.exitCode,
+    finalMessagePreview: preview,
+    errorMessage: run.errorMessage,
+    pid: run.pid,
+  };
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
 }

@@ -155,6 +155,189 @@ test("CodexAdapter surfaces failed run logs in status output", async () => {
   assert.match(pushed[1] ?? "", /failed: demo/);
 });
 
+test("CodexAdapter.listRuns returns runs for actor sorted by startedAt with filters honoured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-list-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  const latestPath = join(dir, "codex", "codex:user-1", "latest.json");
+
+  await adapter.handle(makeMessage({ text: "第一条任务", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "第一条任务";
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await adapter.handle(makeMessage({ text: "第二条任务", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "第二条任务";
+  });
+
+  const runs = await adapter.listRuns({ actorId: "user-1" });
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0].prompt, "第二条任务");
+  assert.equal(runs[1].prompt, "第一条任务");
+
+  const limited = await adapter.listRuns({ actorId: "user-1", limit: 1 });
+  assert.equal(limited.length, 1);
+  assert.equal(limited[0].prompt, "第二条任务");
+
+  const other = await adapter.listRuns({ actorId: "user-2" });
+  assert.equal(other.length, 0);
+});
+
+test("CodexAdapter.setCurrent seeds the next prompt from the resumed run, not latest", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-resume-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  const latestPath = join(dir, "codex", "codex:user-1", "latest.json");
+
+  await adapter.handle(makeMessage({ text: "早期任务：帮我写 A", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "早期任务：帮我写 A";
+  });
+  const [runA] = await adapter.listRuns({ actorId: "user-1", limit: 1 });
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await adapter.handle(makeMessage({ text: "较新任务：帮我写 B", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "较新任务：帮我写 B";
+  });
+
+  await adapter.setCurrent("codex:user-1", runA.runId);
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await adapter.handle(makeMessage({ text: "基于之前答复再改一下", hasDirectives: false }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "基于之前答复再改一下";
+  });
+
+  const run = JSON.parse(await readFile(latestPath, "utf8"));
+  const lastArg = run.args[run.args.length - 1];
+  assert.match(lastArg, /fake codex summary: 早期任务：帮我写 A/);
+  assert.doesNotMatch(lastArg, /fake codex summary: 较新任务：帮我写 B/);
+
+  const currentPath = join(dir, "codex", "codex:user-1", "current.json");
+  await assert.rejects(() => readFile(currentPath, "utf8"));
+});
+
+test("CodexAdapter.clearCurrent removes the pointer and is idempotent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-clear-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  const latestPath = join(dir, "codex", "codex:user-1", "latest.json");
+  await adapter.handle(makeMessage({ text: "随便一个任务", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string };
+    return latest.status === "completed";
+  });
+
+  const [run] = await adapter.listRuns({ actorId: "user-1", limit: 1 });
+  await adapter.setCurrent("codex:user-1", run.runId);
+
+  const currentPath = join(dir, "codex", "codex:user-1", "current.json");
+  const pointer = JSON.parse(await readFile(currentPath, "utf8"));
+  assert.equal(pointer.runId, run.runId);
+
+  await adapter.clearCurrent("codex:user-1");
+  await assert.rejects(() => readFile(currentPath, "utf8"));
+
+  await adapter.clearCurrent("codex:user-1");
+});
+
+test("CodexAdapter.reconcileZombieRuns marks interrupted runs as failed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-zombie-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: "/bin/true", defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  const sessionId = "codex:user-1";
+  const runId = "1700000000000";
+  const runDir = join(dir, "codex", sessionId, runId);
+  await mkdir(runDir, { recursive: true });
+  const runPath = join(runDir, "run.json");
+  const latestPath = join(dir, "codex", sessionId, "latest.json");
+
+  const record = {
+    id: runId,
+    sessionId,
+    channel: "feishu",
+    actorId: "user-1",
+    conversationId: "chat-1",
+    projectId: "demo",
+    projectPath: projectDir,
+    prompt: "pretend task",
+    status: "running",
+    command: "/bin/true",
+    args: [],
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    outputPath: join(runDir, "codex.log"),
+    lastMessagePath: join(runDir, "last-message.txt"),
+    pid: 99999999,
+  };
+  await writeFile(runPath, JSON.stringify(record, null, 2), "utf8");
+  await writeFile(latestPath, JSON.stringify(record, null, 2), "utf8");
+
+  const fixed = await adapter.reconcileZombieRuns();
+  assert.equal(fixed, 1);
+
+  const afterRun = JSON.parse(await readFile(runPath, "utf8")) as { status: string; errorMessage?: string };
+  assert.equal(afterRun.status, "failed");
+  assert.match(afterRun.errorMessage ?? "", /hub restarted/);
+
+  const afterLatest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string };
+  assert.equal(afterLatest.status, "failed");
+
+  const fixed2 = await adapter.reconcileZombieRuns();
+  assert.equal(fixed2, 0);
+});
+
 async function writeFakeCodex(baseDir: string): Promise<string> {
   const scriptPath = join(baseDir, "fake-codex.mjs");
   const script = `#!/usr/bin/env node

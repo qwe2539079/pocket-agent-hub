@@ -36,6 +36,15 @@ export async function bootstrap(configPath?: string): Promise<void> {
     ["gemini", new GeminiAdapter()],
   ]);
 
+  for (const adapter of agents.values()) {
+    if (adapter.reconcileZombieRuns) {
+      const fixed = await adapter.reconcileZombieRuns();
+      if (fixed > 0) {
+        console.log(`[hub] reconciled ${fixed} interrupted ${adapter.id} run(s) from previous session`);
+      }
+    }
+  }
+
   const router = new HubRouter(config, policyEngine, agents, sessions, projects, auditLog);
   const connectors: ChannelConnector[] = [];
 
