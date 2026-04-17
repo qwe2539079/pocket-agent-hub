@@ -6,9 +6,11 @@ import { join } from "node:path";
 
 import { ClaudeAdapter } from "../src/agents/claude/adapter.js";
 import type { AppConfig } from "../src/config/types.js";
+import type { HubMessage, HubResponse } from "../src/core/message.js";
 import { ProjectRegistry } from "../src/core/project.js";
 import { HubRouter } from "../src/core/router.js";
 import { SessionRegistry } from "../src/core/session.js";
+import type { AgentAdapter, ListRunsOptions, RunSummary } from "../src/core/types.js";
 import { PolicyEngine } from "../src/policies/policy-engine.js";
 import { AuditLog } from "../src/storage/audit-log.js";
 import { FileStore } from "../src/storage/file-store.js";
@@ -233,4 +235,229 @@ test("router supports current and reset session commands per conversation", asyn
 
   assert.match(reset.text, /cleared active session/);
   assert.equal(sessions.get(first.sessionId), undefined);
+});
+
+class StubCodexAdapter implements AgentAdapter {
+  readonly id = "codex";
+  runs: RunSummary[] = [];
+  clearedSessions: string[] = [];
+  setCurrentCalls: Array<{ sessionId: string; runId: string }> = [];
+
+  async handle(message: HubMessage): Promise<HubResponse> {
+    return {
+      sessionId: `codex:${message.senderId}`,
+      text: `stub codex reply: ${message.text}`,
+    };
+  }
+
+  async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+    return this.runs
+      .filter((run) => !options.actorId || run.actorId === options.actorId)
+      .filter((run) => !options.status || run.status === options.status)
+      .slice(0, options.limit ?? this.runs.length);
+  }
+
+  async getRun(runId: string): Promise<RunSummary | null> {
+    return this.runs.find((run) => run.runId === runId) ?? null;
+  }
+
+  async setCurrent(sessionId: string, runId: string): Promise<void> {
+    this.setCurrentCalls.push({ sessionId, runId });
+  }
+
+  async clearCurrent(sessionId: string): Promise<void> {
+    this.clearedSessions.push(sessionId);
+  }
+}
+
+function devConfigAllowingCodex(): AppConfig {
+  const config = makeConfig();
+  config.personas["daily-assistant"].allowedAgents = ["codex", "claude"];
+  return config;
+}
+
+test("router /list surfaces recent runs from the adapter", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-list-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+  stub.runs = [
+    {
+      runId: "1000",
+      agent: "codex",
+      sessionId: "codex:user-1",
+      actorId: "user-1",
+      channel: "feishu",
+      projectId: "pocket-agent-hub",
+      status: "completed",
+      prompt: "task A",
+      startedAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:05.000Z",
+    },
+    {
+      runId: "999",
+      agent: "codex",
+      sessionId: "codex:user-2",
+      actorId: "user-2",
+      channel: "feishu",
+      projectId: "pocket-agent-hub",
+      status: "completed",
+      prompt: "other user task",
+      startedAt: "2026-04-15T00:00:00.000Z",
+      updatedAt: "2026-04-15T00:00:05.000Z",
+    },
+  ];
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const result = await router.route({
+    id: "list",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /list",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-runs",
+  });
+
+  assert.match(result.text, /recent codex runs/);
+  assert.match(result.text, /1000 \[completed\]/);
+  assert.doesNotMatch(result.text, /999/);
+});
+
+test("router /resume validates ownership and calls setCurrent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-resume-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+  stub.runs = [
+    {
+      runId: "1000",
+      agent: "codex",
+      sessionId: "codex:user-1",
+      actorId: "user-1",
+      channel: "feishu",
+      projectId: "pocket-agent-hub",
+      status: "completed",
+      prompt: "task A",
+      startedAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:05.000Z",
+      finalMessagePreview: "here is the summary",
+    },
+  ];
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const ok = await router.route({
+    id: "resume-ok",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /resume 1000",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "resume-run",
+    resumeRunId: "1000",
+  });
+
+  assert.match(ok.text, /queued resume of codex run 1000/);
+  assert.equal(ok.sessionId, "codex:user-1");
+  assert.deepEqual(stub.setCurrentCalls, [{ sessionId: "codex:user-1", runId: "1000" }]);
+
+  const notYours = await router.route({
+    id: "resume-other",
+    channel: "feishu",
+    senderId: "user-2",
+    conversationId: "chat-2",
+    persona: "daily-assistant",
+    text: "/codex /resume 1000",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "resume-run",
+    resumeRunId: "1000",
+  });
+
+  assert.match(notYours.text, /no codex run "1000" found for this account/);
+  assert.equal(stub.setCurrentCalls.length, 1);
+
+  const missingId = await router.route({
+    id: "resume-missing",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /resume",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "resume-run",
+  });
+
+  assert.match(missingId.text, /usage: `\/resume <run-id>`/);
+});
+
+test("router /reset forwards clearCurrent to the cleared session's adapter", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-reset-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  await router.route({
+    id: "first",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "kick off",
+    targetAgent: "codex",
+    projectId: "pocket-agent-hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  await router.route({
+    id: "reset",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/reset",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "reset-session",
+  });
+
+  assert.deepEqual(stub.clearedSessions, ["codex:user-1"]);
 });

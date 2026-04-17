@@ -1,6 +1,12 @@
 import type { AgentKind, ChannelKind, PersonaKind } from "../config/types.js";
 
-export type SessionCommand = "show-current-session" | "reset-session" | "new-session";
+export type SessionCommand =
+  | "show-current-session"
+  | "reset-session"
+  | "new-session"
+  | "list-runs"
+  | "show-running"
+  | "resume-run";
 
 export interface HubMessage {
   id: string;
@@ -15,6 +21,7 @@ export interface HubMessage {
   timestamp: string;
   hasDirectives?: boolean;
   sessionCommand?: SessionCommand;
+  resumeRunId?: string;
 }
 
 export interface HubResponse {

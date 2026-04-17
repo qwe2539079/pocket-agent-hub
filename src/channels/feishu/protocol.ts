@@ -115,6 +115,7 @@ export function buildHubMessage(input: ParsedFeishuMessage): HubMessage {
     timestamp: normalizeTimestamp(input.timestamp),
     hasDirectives: command.hasDirectives,
     sessionCommand: command.sessionCommand,
+    resumeRunId: command.resumeRunId,
   };
 }
 
@@ -133,12 +134,14 @@ function parseCommandText(input: string): {
   text: string;
   hasDirectives: boolean;
   sessionCommand?: SessionCommand;
+  resumeRunId?: string;
 } {
   const tokens = input.trim().split(/\s+/);
   let persona: PersonaKind = "daily-assistant";
   let targetAgent: AgentKind | undefined;
   let projectId: string | undefined;
   let sessionCommand: SessionCommand | undefined;
+  let resumeRunId: string | undefined;
   const textTokens: string[] = [];
   let hasDirectives = false;
 
@@ -200,6 +203,29 @@ function parseCommandText(input: string): {
       continue;
     }
 
+    if (token === "/list") {
+      hasDirectives = true;
+      sessionCommand = "list-runs";
+      continue;
+    }
+
+    if (token === "/running") {
+      hasDirectives = true;
+      sessionCommand = "show-running";
+      continue;
+    }
+
+    if (token === "/resume") {
+      hasDirectives = true;
+      sessionCommand = "resume-run";
+      const next = tokens[index + 1];
+      if (next && !next.startsWith("/")) {
+        resumeRunId = next;
+        index += 1;
+      }
+      continue;
+    }
+
     textTokens.push(token);
   }
 
@@ -210,6 +236,7 @@ function parseCommandText(input: string): {
     text: textTokens.join(" ").trim() || input.trim(),
     hasDirectives,
     sessionCommand,
+    resumeRunId,
   };
 }
 

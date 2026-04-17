@@ -95,3 +95,53 @@ test("Feishu text event supports explicit session commands", () => {
   assert.equal(message.sessionCommand, "show-current-session");
   assert.equal(message.hasDirectives, true);
 });
+
+function buildFromText(text: string, eventId = "evt-x", chatId = "oc-x") {
+  const parsed = parseFeishuMessage({
+    header: {
+      event_id: eventId,
+      event_type: "im.message.receive_v1",
+      create_time: "1713200000000",
+    },
+    event: {
+      sender: { sender_id: { open_id: "ou_test" } },
+      message: {
+        message_id: eventId,
+        chat_id: chatId,
+        message_type: "text",
+        content: JSON.stringify({ text }),
+        create_time: "1713200000000",
+      },
+    },
+  });
+  assert.ok(parsed);
+  return buildHubMessage(parsed);
+}
+
+test("Feishu text event parses /list and /running as session commands", () => {
+  const list = buildFromText("/list");
+  assert.equal(list.sessionCommand, "list-runs");
+  assert.equal(list.hasDirectives, true);
+  assert.equal(list.resumeRunId, undefined);
+
+  const running = buildFromText("/codex /running");
+  assert.equal(running.sessionCommand, "show-running");
+  assert.equal(running.targetAgent, "codex");
+  assert.equal(running.hasDirectives, true);
+});
+
+test("Feishu text event parses /resume with and without a run id", () => {
+  const withId = buildFromText("/resume 1713200000000");
+  assert.equal(withId.sessionCommand, "resume-run");
+  assert.equal(withId.resumeRunId, "1713200000000");
+  assert.equal(withId.hasDirectives, true);
+
+  const missingId = buildFromText("/resume");
+  assert.equal(missingId.sessionCommand, "resume-run");
+  assert.equal(missingId.resumeRunId, undefined);
+
+  const directiveAfter = buildFromText("/resume /codex");
+  assert.equal(directiveAfter.sessionCommand, "resume-run");
+  assert.equal(directiveAfter.resumeRunId, undefined);
+  assert.equal(directiveAfter.targetAgent, "codex");
+});
