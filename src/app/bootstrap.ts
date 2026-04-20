@@ -37,11 +37,15 @@ export async function bootstrap(configPath?: string): Promise<void> {
   ]);
 
   for (const adapter of agents.values()) {
-    if (adapter.reconcileZombieRuns) {
+    if (!adapter.reconcileZombieRuns) continue;
+    try {
       const fixed = await adapter.reconcileZombieRuns();
       if (fixed > 0) {
         console.log(`[hub] reconciled ${fixed} interrupted ${adapter.id} run(s) from previous session`);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[hub] reconcile for ${adapter.id} failed, continuing startup: ${message}`);
     }
   }
 

@@ -13,13 +13,19 @@ type ConfigSource = JsonObject & { extends?: string };
 
 export async function loadConfig(configPath: string): Promise<AppConfig> {
   const absolutePath = resolve(configPath);
-  const parsed = (await loadConfigSource(absolutePath)) as Partial<AppConfig>;
+  const parsed = (await loadConfigSource(absolutePath, new Set())) as Partial<AppConfig>;
 
   assertConfig(parsed, absolutePath);
   return parsed;
 }
 
-async function loadConfigSource(configPath: string): Promise<JsonObject> {
+async function loadConfigSource(configPath: string, visited: Set<string>): Promise<JsonObject> {
+  if (visited.has(configPath)) {
+    const chain = [...visited, configPath].join(" -> ");
+    throw new Error(`Config extends cycle detected: ${chain}`);
+  }
+  visited.add(configPath);
+
   const raw = await readFile(configPath, "utf8");
   const parsed = JSON.parse(raw) as ConfigSource;
 
@@ -28,7 +34,7 @@ async function loadConfigSource(configPath: string): Promise<JsonObject> {
   }
 
   const parentPath = resolve(dirname(configPath), parsed.extends);
-  const parentConfig = await loadConfigSource(parentPath);
+  const parentConfig = await loadConfigSource(parentPath, visited);
   const { extends: _extends, ...overlay } = parsed;
 
   return mergeObjects(parentConfig, overlay);

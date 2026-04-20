@@ -418,6 +418,214 @@ test("router /resume validates ownership and calls setCurrent", async () => {
   assert.match(missingId.text, /usage: `\/resume <run-id>`/);
 });
 
+test("router /list returns empty-state message when adapter has no runs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-list-empty-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const result = await router.route({
+    id: "list-empty",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /list",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-runs",
+  });
+
+  assert.match(result.text, /no codex runs recorded yet/);
+});
+
+test("router /running returns only running tasks, with empty-state fallback", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-running-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+  stub.runs = [
+    {
+      runId: "2000",
+      agent: "codex",
+      sessionId: "codex:user-1",
+      actorId: "user-1",
+      channel: "feishu",
+      projectId: "pocket-agent-hub",
+      status: "completed",
+      prompt: "already done",
+      startedAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:05.000Z",
+    },
+  ];
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const empty = await router.route({
+    id: "running-empty",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /running",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "show-running",
+  });
+
+  assert.match(empty.text, /no codex tasks are currently running/);
+
+  stub.runs.push({
+    runId: "2001",
+    agent: "codex",
+    sessionId: "codex:user-1",
+    actorId: "user-1",
+    channel: "feishu",
+    projectId: "pocket-agent-hub",
+    status: "running",
+    prompt: "long running task",
+    startedAt: "2026-04-17T00:00:00.000Z",
+    updatedAt: "2026-04-17T00:00:01.000Z",
+  });
+
+  const running = await router.route({
+    id: "running-ok",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /running",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "show-running",
+  });
+
+  assert.match(running.text, /codex tasks currently running/);
+  assert.match(running.text, /2001/);
+  assert.doesNotMatch(running.text, /2000/);
+});
+
+test("router rejects /list and /resume when no agent can be resolved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-noagent-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const stub = new StubCodexAdapter();
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const list = await router.route({
+    id: "list-no-agent",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/list",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-runs",
+  });
+
+  assert.match(list.text, /no active agent/);
+
+  const resume = await router.route({
+    id: "resume-no-agent",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/resume 1000",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "resume-run",
+    resumeRunId: "1000",
+  });
+
+  assert.match(resume.text, /no active agent/);
+});
+
+test("router reports unsupported when adapter is missing run-history or resume capability", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-bare-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  class BareCodexAdapter implements AgentAdapter {
+    readonly id = "codex";
+    async handle(message: HubMessage): Promise<HubResponse> {
+      return { sessionId: `codex:${message.senderId}`, text: "bare" };
+    }
+  }
+
+  const router = new HubRouter(
+    devConfigAllowingCodex(),
+    new PolicyEngine(),
+    new Map([["codex", new BareCodexAdapter()]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const list = await router.route({
+    id: "list-unsupported",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /list",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-runs",
+  });
+
+  assert.match(list.text, /does not expose run history/);
+
+  const resume = await router.route({
+    id: "resume-unsupported",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/codex /resume 1000",
+    targetAgent: "codex",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "resume-run",
+    resumeRunId: "1000",
+  });
+
+  assert.match(resume.text, /does not support resume/);
+});
+
 test("router /reset forwards clearCurrent to the cleared session's adapter", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-router-reset-"));
   const store = new FileStore(dir);

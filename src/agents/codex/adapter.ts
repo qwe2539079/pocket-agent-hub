@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -268,11 +268,10 @@ export class CodexAdapter implements AgentAdapter {
 
     let seed: CodexRunRecord | null = null;
 
-    const pointer = await this.readCurrent(sessionId);
+    // /resume is one-shot: atomically rename-then-read so concurrent turns can't both consume the same pointer.
+    const pointer = await this.consumeCurrent(sessionId);
     if (pointer) {
       const resumed = await this.readRunById(pointer.runId);
-      // /resume is one-shot: consume the pointer whether or not the run is usable
-      await this.clearCurrent(sessionId);
       if (resumed) {
         seed = resumed;
       }
@@ -435,8 +434,23 @@ export class CodexAdapter implements AgentAdapter {
     await this.writeJson(resolve(this.storageDir, "codex", run.sessionId, run.id, "run.json"), run);
   }
 
-  private async readCurrent(sessionId: string): Promise<CurrentRunPointer | null> {
-    return this.readJson<CurrentRunPointer>(this.currentPath(sessionId));
+  private async consumeCurrent(sessionId: string): Promise<CurrentRunPointer | null> {
+    const path = this.currentPath(sessionId);
+    const claimed = `${path}.consumed-${process.pid}-${Date.now()}`;
+    try {
+      await rename(path, claimed);
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
+    }
+    try {
+      const raw = await readFile(claimed, "utf8");
+      return JSON.parse(raw) as CurrentRunPointer;
+    } catch {
+      return null;
+    } finally {
+      await rm(claimed).catch(() => {});
+    }
   }
 
   private currentPath(sessionId: string): string {

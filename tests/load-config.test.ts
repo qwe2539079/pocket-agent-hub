@@ -97,3 +97,17 @@ test("loadConfig merges a local override via extends", async () => {
   assert.equal(config.channels.weixin.enabled, false);
   assert.equal(config.projects[0]?.id, "pocket-agent-hub");
 });
+
+test("loadConfig rejects extends cycles with a clear error", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-config-cycle-"));
+  const aPath = join(dir, "a.json");
+  const bPath = join(dir, "b.json");
+
+  await writeFile(aPath, JSON.stringify({ extends: "./b.json" }));
+  await writeFile(bPath, JSON.stringify({ extends: "./a.json" }));
+
+  await assert.rejects(
+    () => loadConfig(aPath),
+    /Config extends cycle detected/,
+  );
+});
