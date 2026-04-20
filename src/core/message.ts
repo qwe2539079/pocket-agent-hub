@@ -6,7 +6,8 @@ export type SessionCommand =
   | "new-session"
   | "list-runs"
   | "show-running"
-  | "resume-run";
+  | "resume-run"
+  | "list-native";
 
 export interface HubMessage {
   id: string;

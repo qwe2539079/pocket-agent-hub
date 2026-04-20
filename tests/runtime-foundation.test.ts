@@ -9,7 +9,7 @@ import type { HubMessage, HubResponse } from "../src/core/message.js";
 import { ProjectRegistry } from "../src/core/project.js";
 import { HubRouter } from "../src/core/router.js";
 import { SessionRegistry } from "../src/core/session.js";
-import type { AgentAdapter, ListRunsOptions, RunSummary } from "../src/core/types.js";
+import type { AgentAdapter, ListRunsOptions, NativeSessionSummary, RunSummary } from "../src/core/types.js";
 import { PolicyEngine } from "../src/policies/policy-engine.js";
 import { AuditLog } from "../src/storage/audit-log.js";
 import { FileStore } from "../src/storage/file-store.js";
@@ -675,6 +675,101 @@ test("router reports unsupported when adapter is missing run-history or resume c
   });
 
   assert.match(resume.text, /does not support resume/);
+});
+
+test("router /desktop aggregates native sessions from all adapters and maps cwd to project id", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-desktop-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  class StubClaudeWithNative implements AgentAdapter {
+    readonly id = "claude";
+    async handle(message: HubMessage): Promise<HubResponse> {
+      return { sessionId: `claude:${message.senderId}`, text: "stub" };
+    }
+    async listNativeSessions(): Promise<NativeSessionSummary[]> {
+      return [
+        {
+          agent: "claude",
+          sessionId: "older-session",
+          cwd: "/tmp/pocket-agent-hub",
+          preview: "older",
+          lastActivityAt: "2026-04-18T00:00:00.000Z",
+        },
+        {
+          agent: "claude",
+          sessionId: "newer-session",
+          cwd: "/does/not/match/any/project",
+          preview: "newer on an unregistered path",
+          lastActivityAt: "2026-04-19T00:00:00.000Z",
+        },
+      ];
+    }
+  }
+
+  const router = new HubRouter(
+    makeConfig(),
+    new PolicyEngine(),
+    new Map([["claude", new StubClaudeWithNative()]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const result = await router.route({
+    id: "desktop",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/desktop",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-native",
+  });
+
+  assert.match(result.text, /desktop agent sessions/);
+  // Newer one listed first.
+  const newerIdx = result.text.indexOf("newer-session");
+  const olderIdx = result.text.indexOf("older-session");
+  assert.ok(newerIdx !== -1 && olderIdx !== -1 && newerIdx < olderIdx);
+  // cwd matching ProjectRegistry resolves to project id.
+  assert.match(result.text, /project=pocket-agent-hub/);
+  // unregistered cwd gets labeled.
+  assert.match(result.text, /unregistered/);
+  // Takeover hint present.
+  assert.match(result.text, /\/takeover/);
+});
+
+test("router /desktop returns empty-state message when no adapter reports any session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-desktop-empty-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  const router = new HubRouter(
+    makeConfig(),
+    new PolicyEngine(),
+    new Map([["claude", new EchoClaudeAdapter()]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const result = await router.route({
+    id: "desktop-empty",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/desktop",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "list-native",
+  });
+
+  assert.match(result.text, /no desktop agent sessions/);
 });
 
 test("router /reset forwards clearCurrent to the cleared session's adapter", async () => {

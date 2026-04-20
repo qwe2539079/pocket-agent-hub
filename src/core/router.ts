@@ -5,7 +5,7 @@ import type { HubMessage, HubResponse } from "./message.js";
 import { ProjectRegistry } from "./project.js";
 import { SessionRegistry } from "./session.js";
 import type { SessionRecord } from "./session.js";
-import type { AgentAdapter, RunSummary } from "./types.js";
+import type { AgentAdapter, NativeSessionSummary, RunSummary } from "./types.js";
 
 export class HubRouter {
   constructor(
@@ -261,6 +261,25 @@ export class HubRouter {
       };
     }
 
+    if (message.sessionCommand === "list-native") {
+      const collected: NativeSessionSummary[] = [];
+      for (const adapter of this.agents.values()) {
+        if (!adapter.listNativeSessions) continue;
+        try {
+          const list = await adapter.listNativeSessions();
+          collected.push(...list);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[hub] listNativeSessions failed for ${adapter.id}: ${msg}`);
+        }
+      }
+      collected.sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""));
+      return {
+        sessionId: `system:${message.senderId}`,
+        text: renderNativeSessionList(collected.slice(0, 10), this.projects),
+      };
+    }
+
     return null;
   }
 
@@ -322,4 +341,24 @@ function renderResumeConfirm(run: RunSummary): string {
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…`;
+}
+
+function renderNativeSessionList(sessions: NativeSessionSummary[], projects: ProjectRegistry): string {
+  if (sessions.length === 0) {
+    return "[hub] no desktop agent sessions found on this workstation.";
+  }
+
+  const lines = ["[hub] desktop agent sessions (most recent first):"];
+  for (const session of sessions) {
+    const project = projects.list().find((candidate) => candidate.path === session.cwd);
+    const projectLabel = project ? project.id : `${session.cwd} [unregistered]`;
+    const activity = session.lastActivityAt ? ` lastActivity=${session.lastActivityAt}` : "";
+    lines.push(`- ${session.agent} ${session.sessionId} project=${projectLabel}${activity}`);
+    if (session.preview) {
+      lines.push(`  ${truncate(session.preview, 80)}`);
+    }
+  }
+  lines.push("");
+  lines.push("Use `/takeover <session-id>` to continue one from this chat. Close the desktop session first.");
+  return lines.join("\n");
 }

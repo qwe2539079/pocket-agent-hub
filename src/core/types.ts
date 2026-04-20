@@ -29,6 +29,14 @@ export interface ListRunsOptions {
   limit?: number;
 }
 
+export interface NativeSessionSummary {
+  agent: AgentKind;
+  sessionId: string;
+  cwd: string;
+  preview?: string;
+  lastActivityAt?: string;
+}
+
 export interface AgentAdapter {
   readonly id: string;
   handle(message: HubMessage): Promise<HubResponse>;
@@ -37,6 +45,7 @@ export interface AgentAdapter {
   setCurrent?(sessionId: string, runId: string): Promise<void>;
   clearCurrent?(sessionId: string): Promise<void>;
   reconcileZombieRuns?(): Promise<number>;
+  listNativeSessions?(): Promise<NativeSessionSummary[]>;
 }
 
 export interface ChannelConnector {

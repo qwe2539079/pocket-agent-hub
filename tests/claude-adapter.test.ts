@@ -300,6 +300,74 @@ test("ClaudeAdapter.reconcileZombieRuns marks interrupted runs as failed", async
   assert.equal(fixed2, 0);
 });
 
+test("ClaudeAdapter.listNativeSessions scans ~/.claude/projects jsonl files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-claude-native-"));
+  const sessionsDir = join(dir, "projects");
+  const projectA = join(sessionsDir, "-home-demo-project-a");
+  const projectB = join(sessionsDir, "-home-demo-project-b");
+  await mkdir(projectA, { recursive: true });
+  await mkdir(projectB, { recursive: true });
+
+  const sessionA = "11111111-1111-1111-1111-111111111111";
+  const sessionB = "22222222-2222-2222-2222-222222222222";
+
+  await writeFile(
+    join(projectA, `${sessionA}.jsonl`),
+    [
+      JSON.stringify({ type: "permission-mode", permissionMode: "default", sessionId: sessionA }),
+      JSON.stringify({ type: "user", cwd: "/home/demo/project-a", message: { role: "user", content: "第一个会话的第一句" } }),
+      JSON.stringify({ type: "assistant", cwd: "/home/demo/project-a", message: { role: "assistant", content: "reply" } }),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+
+  await writeFile(
+    join(projectB, `${sessionB}.jsonl`),
+    [
+      JSON.stringify({ type: "permission-mode", permissionMode: "default", sessionId: sessionB }),
+      JSON.stringify({
+        type: "user",
+        cwd: "/home/demo/project-b",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "<command-name>/slash</command-name>\n第二个会话关于什么" },
+          ],
+        },
+      }),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+
+  // Make A older than B so sort can be asserted.
+  const { utimes } = await import("node:fs/promises");
+  const now = Date.now();
+  await utimes(join(projectA, `${sessionA}.jsonl`), new Date(now - 60_000), new Date(now - 60_000));
+  await utimes(join(projectB, `${sessionB}.jsonl`), new Date(now), new Date(now));
+
+  const prior = process.env.POCKET_AGENT_HUB_CLAUDE_SESSIONS_DIR;
+  process.env.POCKET_AGENT_HUB_CLAUDE_SESSIONS_DIR = sessionsDir;
+  try {
+    const adapter = new ClaudeAdapter(
+      { enabled: true, command: "claude", defaultProfile: "x" },
+      new ProjectRegistry([]),
+      dir,
+      new NotificationCenter(),
+    );
+    const sessions = await adapter.listNativeSessions();
+    assert.equal(sessions.length, 2);
+    assert.equal(sessions[0].sessionId, sessionB);
+    assert.equal(sessions[0].cwd, "/home/demo/project-b");
+    assert.match(sessions[0].preview ?? "", /第二个会话/);
+    assert.doesNotMatch(sessions[0].preview ?? "", /command-name/);
+    assert.equal(sessions[1].sessionId, sessionA);
+    assert.equal(sessions[1].preview, "第一个会话的第一句");
+  } finally {
+    if (prior === undefined) delete process.env.POCKET_AGENT_HUB_CLAUDE_SESSIONS_DIR;
+    else process.env.POCKET_AGENT_HUB_CLAUDE_SESSIONS_DIR = prior;
+  }
+});
+
 async function writeFakeClaude(baseDir: string): Promise<string> {
   const scriptPath = join(baseDir, "fake-claude.mjs");
   const script = `#!/usr/bin/env node

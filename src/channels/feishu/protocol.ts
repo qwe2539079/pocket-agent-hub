@@ -226,6 +226,12 @@ function parseCommandText(input: string): {
       continue;
     }
 
+    if (token === "/desktop") {
+      hasDirectives = true;
+      sessionCommand = "list-native";
+      continue;
+    }
+
     textTokens.push(token);
   }
 
