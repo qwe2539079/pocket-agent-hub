@@ -14,11 +14,14 @@ const NATIVE_SCAN_LINE_LIMIT = 40;
 export class ClaudeAdapter extends RunAdapter {
   readonly id: AgentKind = "claude";
 
-  protected async buildArgs({ prompt, sandboxMode }: BuildArgsContext): Promise<string[]> {
+  protected async buildArgs({ prompt, sandboxMode, resumeNativeSessionId }: BuildArgsContext): Promise<string[]> {
     const args = ["-p", "--output-format", "text"];
     const permissionMode = mapSandboxToPermissionMode(sandboxMode);
     if (permissionMode) {
       args.push("--permission-mode", permissionMode);
+    }
+    if (resumeNativeSessionId) {
+      args.push("--resume", resumeNativeSessionId);
     }
     args.push(prompt);
     return args;

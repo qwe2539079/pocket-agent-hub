@@ -127,6 +127,7 @@ npm run dev:local
 - project：`/project <id 或 alias>`
 - session：`/current`（查看当前 session）、`/reset`（清空 session）、`/new`（下一次强制新开 session）
 - 运行历史：`/list`（最近的 run）、`/running`（当前运行中的 run）、`/resume <run-id>`（让下一条消息从该 run 的回复继续）
+- 桌面接管：`/desktop`（列出本机上的原生会话）、`/takeover <session-id>`（把某个桌面会话接管到当前手机对话；接管前请先在桌面终端关闭该会话，避免两端同时写同一份会话日志。当前仅支持 Claude）
 
 不带指令的消息会默认续接当前会话的最新 session。
 

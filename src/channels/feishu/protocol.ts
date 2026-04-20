@@ -116,6 +116,7 @@ export function buildHubMessage(input: ParsedFeishuMessage): HubMessage {
     hasDirectives: command.hasDirectives,
     sessionCommand: command.sessionCommand,
     resumeRunId: command.resumeRunId,
+    takeoverSessionId: command.takeoverSessionId,
   };
 }
 
@@ -135,6 +136,7 @@ function parseCommandText(input: string): {
   hasDirectives: boolean;
   sessionCommand?: SessionCommand;
   resumeRunId?: string;
+  takeoverSessionId?: string;
 } {
   const tokens = input.trim().split(/\s+/);
   let persona: PersonaKind = "daily-assistant";
@@ -142,6 +144,7 @@ function parseCommandText(input: string): {
   let projectId: string | undefined;
   let sessionCommand: SessionCommand | undefined;
   let resumeRunId: string | undefined;
+  let takeoverSessionId: string | undefined;
   const textTokens: string[] = [];
   let hasDirectives = false;
 
@@ -232,6 +235,17 @@ function parseCommandText(input: string): {
       continue;
     }
 
+    if (token === "/takeover") {
+      hasDirectives = true;
+      sessionCommand = "takeover-native";
+      const next = tokens[index + 1];
+      if (next && !next.startsWith("/")) {
+        takeoverSessionId = next;
+        index += 1;
+      }
+      continue;
+    }
+
     textTokens.push(token);
   }
 
@@ -243,6 +257,7 @@ function parseCommandText(input: string): {
     hasDirectives,
     sessionCommand,
     resumeRunId,
+    takeoverSessionId,
   };
 }
 

@@ -44,12 +44,23 @@ interface CurrentRunPointer {
   setAt: string;
 }
 
+interface NativeSessionPointer {
+  nativeSessionId: string;
+  setAt: string;
+}
+
 export interface BuildArgsContext {
   prompt: string;
   projectPath: string;
   lastMessagePath: string;
   /** Effective sandbox mode for this run after applying persona overrides. */
   sandboxMode: AgentSandboxMode | undefined;
+  /**
+   * If set, this run is taking over a native CLI session (e.g. claude's
+   * `~/.claude/projects/<hash>/<uuid>.jsonl`). Subclasses should pass the
+   * appropriate resume flag to the CLI and skip hub-side prompt injection.
+   */
+  resumeNativeSessionId?: string;
 }
 
 const STATUS_QUERY_KEYWORDS = [
@@ -119,7 +130,13 @@ export abstract class RunAdapter implements AgentAdapter {
       };
     }
 
-    const executionPrompt = await this.buildExecutionPrompt(message, sessionId, latestRun, project.id);
+    // If a /takeover pointer is queued, this turn resumes a native CLI
+    // session — the CLI keeps its own context, so we skip hub-side prompt
+    // injection and just forward the raw user text.
+    const nativePointer = await this.consumeNativeCurrent(sessionId);
+    const executionPrompt = nativePointer
+      ? message.text
+      : await this.buildExecutionPrompt(message, sessionId, latestRun, project.id);
 
     const run = await this.startRun(
       message.channel,
@@ -131,6 +148,7 @@ export abstract class RunAdapter implements AgentAdapter {
       message.text,
       executionPrompt,
       message.persona,
+      nativePointer?.nativeSessionId,
     );
 
     return {
@@ -182,6 +200,13 @@ export abstract class RunAdapter implements AgentAdapter {
         throw error;
       }
     }
+  }
+
+  async setNativeCurrent(sessionId: string, nativeSessionId: string): Promise<void> {
+    await this.writeJson(this.nativePath(sessionId), {
+      nativeSessionId,
+      setAt: new Date().toISOString(),
+    } satisfies NativeSessionPointer);
   }
 
   async reconcileZombieRuns(): Promise<number> {
@@ -238,6 +263,7 @@ export abstract class RunAdapter implements AgentAdapter {
     prompt: string,
     executionPrompt: string,
     persona: PersonaKind,
+    resumeNativeSessionId?: string,
   ): Promise<RunRecord> {
     const runId = `${Date.now()}`;
     const runDir = resolve(this.storageDir, this.id, sessionId, runId);
@@ -246,7 +272,13 @@ export abstract class RunAdapter implements AgentAdapter {
     await mkdir(runDir, { recursive: true });
 
     const sandboxMode = this.personas[persona]?.sandboxOverride ?? this.config.sandboxMode;
-    const args = await this.buildArgs({ prompt: executionPrompt, projectPath, lastMessagePath, sandboxMode });
+    const args = await this.buildArgs({
+      prompt: executionPrompt,
+      projectPath,
+      lastMessagePath,
+      sandboxMode,
+      resumeNativeSessionId,
+    });
     const now = new Date().toISOString();
     const run: RunRecord = {
       id: runId,
@@ -478,6 +510,29 @@ export abstract class RunAdapter implements AgentAdapter {
 
   private currentPath(sessionId: string): string {
     return resolve(this.storageDir, this.id, sessionId, "current.json");
+  }
+
+  private nativePath(sessionId: string): string {
+    return resolve(this.storageDir, this.id, sessionId, "native.json");
+  }
+
+  private async consumeNativeCurrent(sessionId: string): Promise<NativeSessionPointer | null> {
+    const path = this.nativePath(sessionId);
+    const claimed = `${path}.consumed-${process.pid}-${Date.now()}`;
+    try {
+      await rename(path, claimed);
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
+    }
+    try {
+      const raw = await readFile(claimed, "utf8");
+      return JSON.parse(raw) as NativeSessionPointer;
+    } catch {
+      return null;
+    } finally {
+      await rm(claimed).catch(() => {});
+    }
   }
 
   private async readRunById(runId: string): Promise<RunRecord | null> {

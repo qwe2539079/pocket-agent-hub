@@ -742,6 +742,112 @@ test("router /desktop aggregates native sessions from all adapters and maps cwd 
   assert.match(result.text, /\/takeover/);
 });
 
+test("router /takeover validates native session id, maps cwd to project, and calls setNativeCurrent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-takeover-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  class StubClaudeTakeover implements AgentAdapter {
+    readonly id = "claude";
+    setNativeCalls: Array<{ sessionId: string; nativeSessionId: string }> = [];
+    async handle(message: HubMessage): Promise<HubResponse> {
+      return { sessionId: `claude:${message.senderId}`, text: "stub" };
+    }
+    async listNativeSessions(): Promise<NativeSessionSummary[]> {
+      return [
+        {
+          agent: "claude",
+          sessionId: "aaaa-bbbb",
+          cwd: "/tmp/pocket-agent-hub",
+          preview: "prev",
+          lastActivityAt: "2026-04-19T00:00:00.000Z",
+        },
+        {
+          agent: "claude",
+          sessionId: "cccc-dddd",
+          cwd: "/does/not/match",
+          preview: "prev",
+          lastActivityAt: "2026-04-19T00:00:00.000Z",
+        },
+      ];
+    }
+    async setNativeCurrent(sessionId: string, nativeSessionId: string): Promise<void> {
+      this.setNativeCalls.push({ sessionId, nativeSessionId });
+    }
+  }
+
+  const stub = new StubClaudeTakeover();
+  const router = new HubRouter(
+    makeConfig(),
+    new PolicyEngine(),
+    new Map([["claude", stub]]),
+    sessions,
+    new ProjectRegistry(makeConfig().projects),
+    auditLog,
+  );
+
+  const ok = await router.route({
+    id: "takeover-ok",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/takeover aaaa-bbbb",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "takeover-native",
+    takeoverSessionId: "aaaa-bbbb",
+  });
+
+  assert.match(ok.text, /queued takeover of desktop claude session aaaa-bbbb/);
+  assert.match(ok.text, /Project: pocket-agent-hub/);
+  assert.deepEqual(stub.setNativeCalls, [{ sessionId: "claude:user-1", nativeSessionId: "aaaa-bbbb" }]);
+  assert.equal(sessions.get("claude:user-1")?.projectId, "pocket-agent-hub");
+
+  const unregistered = await router.route({
+    id: "takeover-unregistered",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/takeover cccc-dddd",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "takeover-native",
+    takeoverSessionId: "cccc-dddd",
+  });
+  assert.match(unregistered.text, /not a registered project/);
+  assert.equal(stub.setNativeCalls.length, 1);
+
+  const unknown = await router.route({
+    id: "takeover-unknown",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/takeover nothing",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "takeover-native",
+    takeoverSessionId: "nothing",
+  });
+  assert.match(unknown.text, /no desktop session "nothing" found/);
+
+  const missing = await router.route({
+    id: "takeover-missing",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "/takeover",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+    sessionCommand: "takeover-native",
+  });
+  assert.match(missing.text, /usage: `\/takeover <session-id>`/);
+});
+
 test("router /desktop returns empty-state message when no adapter reports any session", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-router-desktop-empty-"));
   const store = new FileStore(dir);

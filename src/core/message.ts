@@ -7,7 +7,8 @@ export type SessionCommand =
   | "list-runs"
   | "show-running"
   | "resume-run"
-  | "list-native";
+  | "list-native"
+  | "takeover-native";
 
 export interface HubMessage {
   id: string;
@@ -23,6 +24,7 @@ export interface HubMessage {
   hasDirectives?: boolean;
   sessionCommand?: SessionCommand;
   resumeRunId?: string;
+  takeoverSessionId?: string;
 }
 
 export interface HubResponse {

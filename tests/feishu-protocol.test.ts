@@ -130,6 +130,21 @@ test("Feishu text event parses /list and /running as session commands", () => {
   assert.equal(running.hasDirectives, true);
 });
 
+test("Feishu text event parses /desktop and /takeover with native session id", () => {
+  const desktop = buildFromText("/desktop");
+  assert.equal(desktop.sessionCommand, "list-native");
+  assert.equal(desktop.hasDirectives, true);
+
+  const takeover = buildFromText("/takeover 11111111-1111-1111-1111-111111111111");
+  assert.equal(takeover.sessionCommand, "takeover-native");
+  assert.equal(takeover.takeoverSessionId, "11111111-1111-1111-1111-111111111111");
+  assert.equal(takeover.hasDirectives, true);
+
+  const takeoverMissing = buildFromText("/takeover");
+  assert.equal(takeoverMissing.sessionCommand, "takeover-native");
+  assert.equal(takeoverMissing.takeoverSessionId, undefined);
+});
+
 test("Feishu text event parses /resume with and without a run id", () => {
   const withId = buildFromText("/resume 1713200000000");
   assert.equal(withId.sessionCommand, "resume-run");

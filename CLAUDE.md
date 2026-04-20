@@ -71,6 +71,7 @@ Five explicit layers wired together in `src/app/bootstrap.ts`:
 - Project: `/project <id-or-alias>` (consumes next token).
 - Session commands: `/current`, `/reset`, `/new`.
 - Run history: `/list`, `/running`, `/resume <run-id>` (`/resume` consumes the next token as the run id).
+- Desktop takeover: `/desktop` (aggregate native sessions across adapters), `/takeover <session-id>` (consumes the next token as the native session uuid). Takeover writes a one-shot `native.json` pointer next to `current.json` in the storage dir; `RunAdapter.handle()` consumes it atomically (rename-then-read) before building the prompt, skips hub-side prompt injection, and passes the uuid through `BuildArgsContext.resumeNativeSessionId`. `ClaudeAdapter.buildArgs` turns that into `--resume <uuid>`. Only Claude implements `listNativeSessions()` today — it scans `$POCKET_AGENT_HUB_CLAUDE_SESSIONS_DIR || ${CLAUDE_CONFIG_DIR || $HOME/.claude}/projects` for `*/*.jsonl`.
 
 The presence of any directive sets `hasDirectives=true`, which disables the "inherit from latest session" logic in the router. If no text remains after stripping directives, the original input is used as the prompt.
 

@@ -280,6 +280,85 @@ export class HubRouter {
       };
     }
 
+    if (message.sessionCommand === "takeover-native") {
+      const nativeId = message.takeoverSessionId;
+      if (!nativeId) {
+        return {
+          sessionId: `system:${message.senderId}`,
+          text: "[hub] usage: `/takeover <session-id>` — run `/desktop` to find ids.",
+        };
+      }
+
+      let match: NativeSessionSummary | undefined;
+      let matchAdapter: AgentAdapter | undefined;
+      for (const adapter of this.agents.values()) {
+        if (!adapter.listNativeSessions) continue;
+        try {
+          const list = await adapter.listNativeSessions();
+          const hit = list.find((session) => session.sessionId === nativeId);
+          if (hit) {
+            match = hit;
+            matchAdapter = adapter;
+            break;
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[hub] listNativeSessions failed for ${adapter.id}: ${msg}`);
+        }
+      }
+
+      if (!match || !matchAdapter) {
+        return {
+          sessionId: `system:${message.senderId}`,
+          text: `[hub] no desktop session "${nativeId}" found. Run \`/desktop\` to see available sessions.`,
+        };
+      }
+
+      if (!matchAdapter.setNativeCurrent) {
+        return {
+          sessionId: `system:${message.senderId}`,
+          text: `[hub] ${match.agent} does not support takeover yet.`,
+        };
+      }
+
+      const project = this.projects.list().find((candidate) => candidate.path === match.cwd);
+      if (!project) {
+        return {
+          sessionId: `system:${message.senderId}`,
+          text:
+            `[hub] session "${nativeId}" was started in cwd "${match.cwd}", which is not a registered project. ` +
+            `Add it to config.projects (with path matching the cwd) before taking over.`,
+        };
+      }
+
+      const hubSessionId = `${match.agent}:${message.senderId}`;
+      await matchAdapter.setNativeCurrent(hubSessionId, nativeId);
+
+      const now = new Date().toISOString();
+      await this.sessions.upsert({
+        id: hubSessionId,
+        channel: message.channel,
+        actorId: message.senderId,
+        conversationId: message.conversationId,
+        agent: match.agent,
+        persona: message.persona,
+        projectId: project.id,
+        summary: `[hub] taking over desktop ${match.agent} session ${nativeId}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      return {
+        sessionId: hubSessionId,
+        text:
+          `[hub] queued takeover of desktop ${match.agent} session ${nativeId}.\n` +
+          `Project: ${project.id}\n` +
+          `Cwd: ${match.cwd}\n` +
+          `Close the session in your desktop terminal before sending the next message, otherwise the two ends may write the same session log concurrently.\n` +
+          `Your next non-directive message will continue that session.`,
+      };
+    }
+
     return null;
   }
 

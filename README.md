@@ -127,6 +127,7 @@ Directives recognized in Feishu text:
 - project: `/project <id-or-alias>`
 - session: `/current` (show active session), `/reset` (clear it), `/new` (force a fresh session)
 - run history: `/list` (recent runs), `/running` (currently running), `/resume <run-id>` (seed the next message from that run's reply)
+- desktop takeover: `/desktop` (list native agent sessions on the workstation), `/takeover <session-id>` (continue one of them from this chat — close the desktop session first to avoid concurrent writes; only Claude is supported so far)
 
 Messages without directives continue the latest active session for the conversation.
 

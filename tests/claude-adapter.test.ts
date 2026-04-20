@@ -300,6 +300,55 @@ test("ClaudeAdapter.reconcileZombieRuns marks interrupted runs as failed", async
   assert.equal(fixed2, 0);
 });
 
+test("ClaudeAdapter consumes a takeover pointer and adds --resume to buildArgs without hub-side prompt seeding", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-claude-takeover-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeClaude(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new ClaudeAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "workspace-write" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "claude" },
+    ]),
+    dir,
+    notifications,
+  );
+
+  const latestPath = join(dir, "claude", "claude:user-1", "latest.json");
+
+  // Establish a prior completed run so without takeover we would inject its reply.
+  await adapter.handle(makeMessage({ text: "先总结", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string };
+    return latest.status === "completed";
+  });
+
+  // Queue a native takeover pointer.
+  await adapter.setNativeCurrent("claude:user-1", "fake-native-uuid");
+
+  // Next message without directives should consume the pointer, skip prompt
+  // injection, and include --resume in args.
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await adapter.handle(makeMessage({ text: "续接桌面会话", hasDirectives: false }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "续接桌面会话";
+  });
+
+  const run = JSON.parse(await readFile(latestPath, "utf8")) as { args: string[] };
+  assert.ok(run.args.includes("--resume"));
+  const resumeIdx = run.args.indexOf("--resume");
+  assert.equal(run.args[resumeIdx + 1], "fake-native-uuid");
+  const lastArg = run.args[run.args.length - 1];
+  assert.equal(lastArg, "续接桌面会话");
+  assert.doesNotMatch(lastArg, /Previous assistant reply/);
+
+  // Pointer is one-shot: the takeover file should be gone.
+  const nativePath = join(dir, "claude", "claude:user-1", "native.json");
+  await assert.rejects(() => readFile(nativePath, "utf8"));
+});
+
 test("ClaudeAdapter.listNativeSessions scans ~/.claude/projects jsonl files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-claude-native-"));
   const sessionsDir = join(dir, "projects");

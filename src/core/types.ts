@@ -46,6 +46,7 @@ export interface AgentAdapter {
   clearCurrent?(sessionId: string): Promise<void>;
   reconcileZombieRuns?(): Promise<number>;
   listNativeSessions?(): Promise<NativeSessionSummary[]>;
+  setNativeCurrent?(sessionId: string, nativeSessionId: string): Promise<void>;
 }
 
 export interface ChannelConnector {
