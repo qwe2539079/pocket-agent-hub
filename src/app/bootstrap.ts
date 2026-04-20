@@ -32,7 +32,7 @@ export async function bootstrap(configPath?: string): Promise<void> {
 
   const agents = new Map<AgentKind, AgentAdapter>([
     ["codex", new CodexAdapter(config.agents.codex, projects, storageDir, notifications)],
-    ["claude", new ClaudeAdapter()],
+    ["claude", new ClaudeAdapter(config.agents.claude, projects, storageDir, notifications)],
     ["gemini", new GeminiAdapter()],
   ]);
 

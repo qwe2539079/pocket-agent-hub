@@ -32,7 +32,8 @@
     "claude": {
       "enabled": true,
       "command": "claude",
-      "defaultProfile": "dev-main"
+      "defaultProfile": "dev-main",
+      "sandboxMode": "workspace-write"
     },
     "gemini": {
       "enabled": false,

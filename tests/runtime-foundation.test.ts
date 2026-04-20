@@ -4,7 +4,6 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ClaudeAdapter } from "../src/agents/claude/adapter.js";
 import type { AppConfig } from "../src/config/types.js";
 import type { HubMessage, HubResponse } from "../src/core/message.js";
 import { ProjectRegistry } from "../src/core/project.js";
@@ -14,6 +13,16 @@ import type { AgentAdapter, ListRunsOptions, RunSummary } from "../src/core/type
 import { PolicyEngine } from "../src/policies/policy-engine.js";
 import { AuditLog } from "../src/storage/audit-log.js";
 import { FileStore } from "../src/storage/file-store.js";
+
+class EchoClaudeAdapter implements AgentAdapter {
+  readonly id = "claude";
+  async handle(message: HubMessage): Promise<HubResponse> {
+    return {
+      sessionId: `${this.id}:${message.senderId}`,
+      text: `[claude] received ${message.persona} message: ${message.text}`,
+    };
+  }
+}
 
 function makeConfig(): AppConfig {
   return {
@@ -96,7 +105,7 @@ test("router rejects unknown projects and writes audit log for allowed routes", 
   const router = new HubRouter(
     makeConfig(),
     new PolicyEngine(),
-    new Map([["claude", new ClaudeAdapter()]]),
+    new Map([["claude", new EchoClaudeAdapter()]]),
     sessions,
     new ProjectRegistry(makeConfig().projects),
     auditLog,
@@ -143,7 +152,7 @@ test("router continues the latest active session when follow-up text has no dire
   const router = new HubRouter(
     makeConfig(),
     new PolicyEngine(),
-    new Map([["claude", new ClaudeAdapter()]]),
+    new Map([["claude", new EchoClaudeAdapter()]]),
     sessions,
     new ProjectRegistry(makeConfig().projects),
     auditLog,
@@ -187,7 +196,7 @@ test("router supports current and reset session commands per conversation", asyn
   const router = new HubRouter(
     makeConfig(),
     new PolicyEngine(),
-    new Map([["claude", new ClaudeAdapter()]]),
+    new Map([["claude", new EchoClaudeAdapter()]]),
     sessions,
     new ProjectRegistry(makeConfig().projects),
     auditLog,
