@@ -23,13 +23,9 @@ Pocket Agent Hub 是一个面向常驻 Ubuntu 主力机的本地优先控制平�
 
 ## 当前状态
 
-当前仓库已经具备：
-
-- 可运行的 TypeScript 脚手架
-- 基本的仓库维护基础设施
-- 适合长期维护的基础结构
-
-运行时功能仍在逐步实现，后续开发以本机上的产品和系统设计基线为准。
+- 运行时基础、飞书主通道、三个智能体适配（Codex / Claude / Gemini，全部基于共享的 `RunAdapter` 基类）都已在工作站上打通并可真实使用。
+- 个人微信通道仍是占位实现，尚未接入真实网关。
+- 后续工作主要集中在通知体验、易用性与文档，而不再是核心骨架。
 
 ## 工作模型
 
@@ -107,34 +103,46 @@ npm run dev:local
 如果保持 `mode: "websocket"`，这台主机只需要能主动访问外网。
 如果切回 `mode: "webhook"`，则仍然需要公网 `HTTPS` 回调地址。
 
-## 飞书中使用 Codex
+## 飞书中使用智能体
 
-当前已经验证通过的主链路是：`飞书 -> Codex -> 自动完成通知`。
+已验证的主链路是：`飞书 → 智能体 → 自动完成通知`。三个智能体（`/codex`、`/claude`、`/gemini`）共享同一套 run 生命周期。
 
-在飞书里发起一个真实 `Codex` 任务，请使用：
+发起任务：
 
 ```text
 /dev /codex /project pocket-agent-hub <任务描述>
+/dev /claude /project hub <任务描述>
 ```
 
-手动查询最近一次任务状态，请使用：
+手动查询最近一次任务状态：
 
 ```text
-/dev /codex /project pocket-agent-hub 查看当前项目状态
+/dev /codex /project hub 查看当前项目状态
 ```
 
-当前行为是：
+飞书文本里可识别的指令：
 
-- 第一条消息会在本机后台启动真实 `codex exec`
-- 飞书会立即返回 `started task` 和本次运行编号
-- 任务运行过程中你可以手动查询状态
-- 任务完成或失败后，飞书会自动回推结果
-- 同一飞书会话中的后续消息默认会续接当前活跃 session
-- `/current` 可查看当前对话绑定的活跃 session
-- `/reset` 可清空当前对话绑定的活跃 session
-- `/new` 可强制下一次请求从新 session 开始，而不复用当前上下文
+- persona：`/dev`（dev-control）或 `/daily`（daily-assistant）
+- agent：`/codex`、`/claude`、`/gemini`
+- project：`/project <id 或 alias>`
+- session：`/current`（查看当前 session）、`/reset`（清空 session）、`/new`（下一次强制新开 session）
+- 运行历史：`/list`（最近的 run）、`/running`（当前运行中的 run）、`/resume <run-id>`（让下一条消息从该 run 的回复继续）
+
+不带指令的消息会默认续接当前会话的最新 session。
+
+项目别名与按 persona 的沙箱策略在配置里声明，详见下节。
 
 更完整的中文操作说明保留在本机 `docs/feishu-codex-guide.md`。
+
+## 关键配置项
+
+- `projects[].aliases?: string[]` —— 项目的短别名，用于 `/project <alias>`。例如给 `pocket-agent-hub` 配 `"aliases": ["hub"]` 后，`/project hub` 即可命中。别名不能与其他项目的 id 或其他别名冲突。
+- `personas[].sandboxOverride?: "read-only" | "workspace-write" | "danger-full-access"` —— 会覆盖 agent 自己的 `sandboxMode`。示例配置把 `daily-assistant` 锁成 `read-only`，这样即便被路由到默认 `workspace-write` 的 agent，也不会意外修改项目文件。
+- 配置文件的 `extends` 链 —— 任意 config JSON 都可以通过 `"extends": "<相对路径>"` 继承并深度合并上层配置，加载时会检测并拒绝循环引用。
+
+### 运行时环境变量
+
+- `POCKET_AGENT_HUB_SKIP_WARMUP=1` —— 跳过启动时的 warmup 路由，让冒烟和 CI 不消耗真实智能体的 API / 订阅配额。启动日志的其它行照常打印，只是不再有 warmup 回复。
 
 ## 致谢
 

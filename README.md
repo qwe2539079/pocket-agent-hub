@@ -23,7 +23,9 @@ It is not a direct fork of those repositories. The goal is a more opinionated pr
 
 ## Current Status
 
-The repository currently contains a validated scaffold plus the repository baseline needed for long-term maintenance. Runtime features are intentionally incomplete and will continue to follow the product and system decisions documented locally on the workstation.
+- Runtime foundation, Feishu main channel, and agent integration (Codex / Claude / Gemini, all backed by the shared `RunAdapter` base) are production-ready on the workstation.
+- Personal WeChat channel is still a placeholder; it has not been wired to a gateway yet.
+- Subsequent work focuses on notifications, ergonomics, and documentation rather than core plumbing.
 
 ## Working Model
 
@@ -101,34 +103,46 @@ npm run dev:local
 If you keep `mode: "websocket"`, the host only needs outbound network access.
 If you switch to `mode: "webhook"`, you will still need a public HTTPS callback URL.
 
-## Feishu Codex Usage
+## Feishu Agent Usage
 
-The current verified mobile workflow is `Feishu -> Codex -> automatic completion notification`.
+The verified mobile workflow is `Feishu → agent → automatic completion notification`, and all three agents (`/codex`, `/claude`, `/gemini`) share the same lifecycle.
 
-Use this format in Feishu to start a real Codex task:
+Start a task:
 
 ```text
 /dev /codex /project pocket-agent-hub <task description>
+/dev /claude /project hub <task description>
 ```
 
-Use this format to check the latest task status manually:
+Check the latest status manually:
 
 ```text
-/dev /codex /project pocket-agent-hub 查看当前项目状态
+/dev /codex /project hub 查看当前项目状态
 ```
 
-Current behavior:
+Directives recognized in Feishu text:
 
-- the first message starts a real background `codex exec` run on the workstation
-- Feishu returns an immediate `started task` response with a run id
-- you can query status manually while the task is still running
-- when the run completes or fails, Feishu now pushes the result back automatically
-- follow-up messages in the same Feishu chat continue the active session by default
-- `/current` shows the active session bound to the current conversation
-- `/reset` clears the active session for the current conversation
-- `/new` forces the next request to start fresh without reusing the last conversation session
+- persona: `/dev` (dev-control) or `/daily` (daily-assistant)
+- agent: `/codex`, `/claude`, `/gemini`
+- project: `/project <id-or-alias>`
+- session: `/current` (show active session), `/reset` (clear it), `/new` (force a fresh session)
+- run history: `/list` (recent runs), `/running` (currently running), `/resume <run-id>` (seed the next message from that run's reply)
+
+Messages without directives continue the latest active session for the conversation.
+
+Project aliases and per-persona sandboxes are declared in the config — see the next section.
 
 A detailed Chinese operating guide is kept locally on the workstation at `docs/feishu-codex-guide.md`.
+
+## Configuration Essentials
+
+- `projects[].aliases?: string[]` — shorter handles for `/project <alias>`. Example: declaring `"aliases": ["hub"]` on `pocket-agent-hub` lets `/project hub` work. Aliases must not collide with another project's id or with another alias.
+- `personas[].sandboxOverride?: "read-only" | "workspace-write" | "danger-full-access"` — wins over the agent's configured `sandboxMode`. The shipped example locks `daily-assistant` to `read-only`, so chat-style interactions cannot edit the project even when routed to an agent that would default to `workspace-write`.
+- `extends` chain in config files — any config JSON can set `"extends": "<relative-path>"` and its fields deep-merge over the parent. Cycles are detected and rejected at load time.
+
+### Operational env vars
+
+- `POCKET_AGENT_HUB_SKIP_WARMUP=1` — skips the boot-time warmup route so smoke tests and CI don't burn agent API / subscription quota. Startup log still prints the usual lines, just without a warmup response.
 
 ## Acknowledgements
 

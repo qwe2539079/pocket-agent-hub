@@ -30,7 +30,13 @@ Pre-commit per `CONTRIBUTING.md`: always run `npm run check` and `npm test`. Com
 
 ## Configuration Model
 
-`src/config/load-config.ts` supports a recursive `extends` chain: a config JSON may set `"extends": "<relative-path>"` and its fields deep-merge over the parent. `config/app.config.local.json` (gitignored) typically extends `config/app.config.example.json`. `bootstrap.ts` resolves the default config by trying `config/app.config.local.json` first, then the example. `storageDir` is resolved relative to the config file's directory — runtime state lands next to the config, not next to `process.cwd()`.
+`src/config/load-config.ts` supports a recursive `extends` chain: a config JSON may set `"extends": "<relative-path>"` and its fields deep-merge over the parent. Cycles are detected and rejected at load time. `config/app.config.local.json` (gitignored) typically extends `config/app.config.example.json`. `bootstrap.ts` resolves the default config by trying `config/app.config.local.json` first, then the example. `storageDir` is resolved relative to the config file's directory — runtime state lands next to the config, not next to `process.cwd()`.
+
+Project aliases (`projects[].aliases?: string[]`) resolve to the canonical project id in `ProjectRegistry` / `HubRouter`; `/project hub` and `/project pocket-agent-hub` produce the same downstream audit, session, and run records.
+
+Per-persona sandbox (`personas[].sandboxOverride?`) wins over the agent's `AgentConfig.sandboxMode` when a run is started under that persona. Example ships with `daily-assistant = read-only`.
+
+`POCKET_AGENT_HUB_SKIP_WARMUP=1` skips the boot-time warmup route so smoke tests and CI don't burn agent quota.
 
 Do not commit `config/app.config.local.json`, tokens, or anything under `runtime/` (both are gitignored).
 
@@ -40,7 +46,7 @@ Five explicit layers wired together in `src/app/bootstrap.ts`:
 
 - `channels/` — inbound/outbound transports (`feishu`, `weixin`). Feishu has two modes: `websocket` (default, uses `@larksuiteoapi/node-sdk` `WSClient` for outbound long-connection) and `webhook` (fallback HTTP server). WeChat connector is still a placeholder.
 - `core/` — canonical `HubMessage`/`HubResponse` (`core/message.ts`), `HubRouter` (`core/router.ts`), `SessionRegistry` (`core/session.ts`), `ProjectRegistry` (`core/project.ts`).
-- `agents/` — `AgentAdapter` implementations. `CodexAdapter` is the only production-track one; it spawns `codex exec` as a child process, persists per-run state under `<storageDir>/codex/<sessionId>/<runId>/`, and notifies on completion via the `NotificationCenter`. `ClaudeAdapter` and `GeminiAdapter` are stubs that echo the message.
+- `agents/` — `AgentAdapter` implementations. `RunAdapter` (`src/agents/run-adapter.ts`) is the shared base that owns the full run lifecycle: spawn child CLI in project cwd, persist per-run state under `<storageDir>/<agent>/<sessionId>/<runId>/` (`run.json`, `<agent>.log`, `last-message.txt`), track `latest.json` and `current.json`, serve `listRuns` / `getRun` / `setCurrent` / `consumeCurrent` / `reconcileZombieRuns`, and notify via `NotificationCenter` on completion. Subclasses (`CodexAdapter`, `ClaudeAdapter`, `GeminiAdapter`) implement only `buildArgs(ctx)` and `attachStdio(child, outputStream, lastMessagePath)`. `ctx.sandboxMode` is the persona-override-aware effective mode.
 - `policies/` — `PolicyEngine.assertAllowed()` gates by `PolicyKind` (`safe-chat` blocks `/shell`; `guarded-dev` blocks destructive shell patterns like `rm -rf`, `mkfs`, `shutdown`, `reboot`).
 - `storage/` — `FileStore` (JSON read/write + JSONL append under `storageDir`), `AuditLog` (appends to `audit/events.jsonl`). `SessionRegistry` persists the full session set to `sessions/index.json` on every upsert.
 
@@ -50,9 +56,9 @@ Five explicit layers wired together in `src/app/bootstrap.ts`:
 
 1. Channel connector receives an event, builds a `ParsedFeishuMessage` (or equivalent), then a `HubMessage` via `buildHubMessage` in `channels/feishu/protocol.ts`.
 2. `HubRouter.route()`:
-   - Handles session commands (`/current`, `/reset`) first and returns immediately.
+   - Handles session commands (`/current`, `/reset`, `/new`, `/list`, `/running`, `/resume <run-id>`) first and returns immediately.
    - If the message has no directives, inherits `persona`/`targetAgent`/`projectId` from the latest session for this `(channel, sender, conversation)` (falling back to latest-by-actor). This is the "follow-up continues the active task" behavior — tests cover it in `tests/runtime-foundation.test.ts`.
-   - Validates the persona's `allowedAgents` and the project id, writes an `audit` event (`allowed`/`blocked`), runs `PolicyEngine.assertAllowed()`, then dispatches to the selected `AgentAdapter`.
+   - Validates the persona's `allowedAgents` and the project id (via `ProjectRegistry.get`, which accepts aliases), canonicalizes `message.projectId` to the real id, writes an `audit` event (`allowed`/`blocked`), runs `PolicyEngine.assertAllowed()`, then dispatches to the selected `AgentAdapter`.
    - Upserts a session record keyed by the adapter's returned `sessionId` (adapters currently build this as `"<agentId>:<senderId>"`, which intentionally makes follow-ups share one session per sender).
 3. Adapter returns `HubResponse { sessionId, text, requiresApproval? }`; the connector renders it back (Feishu appends `Session: …` and optional approval notice via `renderFeishuReply`).
 
@@ -62,18 +68,30 @@ Five explicit layers wired together in `src/app/bootstrap.ts`:
 
 - Persona: `/dev` → `dev-control`, `/daily` → `daily-assistant`.
 - Agent: `/codex`, `/claude`, `/gemini`.
-- Project: `/project <id>` (consumes next token).
-- Session commands: `/current` (show active session), `/reset` (clear active session), `/new` (force a fresh session on the next turn).
+- Project: `/project <id-or-alias>` (consumes next token).
+- Session commands: `/current`, `/reset`, `/new`.
+- Run history: `/list`, `/running`, `/resume <run-id>` (`/resume` consumes the next token as the run id).
 
 The presence of any directive sets `hasDirectives=true`, which disables the "inherit from latest session" logic in the router. If no text remains after stripping directives, the original input is used as the prompt.
 
-### Codex adapter specifics
+### Agent adapter specifics
 
-- `codex exec -C <projectPath> [--profile <name>] --sandbox <mode> --output-last-message <path> <prompt>`; `--profile` is only added when `~/.codex/config.toml` contains `[profiles.<defaultProfile>]`.
-- Every run writes `run.json` and updates `latest.json` under `<storageDir>/codex/<sessionId>/`. stdout+stderr stream to `codex.log` in the run dir.
-- Status queries are detected by `isStatusQuery()` (Chinese + English phrases like `查看当前项目状态`, `status`, `summary`); these read the latest run from disk instead of starting a new one.
-- On `close`, reads the last-message file, persists the terminal state, and calls `NotificationCenter.notifyActor(...)` to push the completion (or failure with log tail) back to the originating Feishu chat.
+Each subclass is thin and defines just its CLI shape:
+
+- **Codex** — `codex exec -C <projectPath> [--profile <name>] --sandbox <mode> --output-last-message <path> <prompt>`. `--profile` is only added when `~/.codex/config.toml` contains `[profiles.<defaultProfile>]`. Codex writes the reply itself via `--output-last-message`, so `attachStdio` just pipes stdout+stderr into `codex.log` and does **not** pre-open `last-message.txt`.
+- **Claude** — `claude -p --output-format text [--permission-mode <mode>] <prompt>`. `--permission-mode` comes from mapping `ctx.sandboxMode`: `danger-full-access` → `bypassPermissions`, `workspace-write` → `acceptEdits`, `read-only` → `plan`. `attachStdio` tees stdout into both `claude.log` and `last-message.txt` because claude prints the reply to stdout.
+- **Gemini** — baseline `gemini -p <prompt>` (CLI shape is a reasonable default; adjust `buildArgs` if the deployed gemini CLI uses different flags). Same stdout-tee strategy as Claude.
+
+All three share the base-class behavior: status queries detected by `isStatusQuery()` read `latest.json` instead of starting a new run; on `close` the base reads `last-message.txt`, writes the terminal `run.json` / `latest.json`, and calls `NotificationCenter.notifyActor(...)` with the reply and a shorter signal text. Completion-notification errors log `run`, `actor`, `channel`, and `conversation` so disk state can be cross-referenced.
 
 ## Tests
 
-Use the Node built-in test runner (`node:test`, `assert/strict`) with `tsx` as the loader. Tests import source as `../src/.../*.js` — keep the `.js` specifier even for `.ts` files (ESM NodeNext requirement). `runtime-foundation.test.ts` is the canonical router/session integration test; `codex-adapter.test.ts` exercises the Codex run lifecycle with a fake `codex` binary; `feishu-protocol.test.ts` covers directive parsing; `load-config.test.ts` covers the `extends` merge; `policy-engine.test.ts` covers policy gates.
+Use the Node built-in test runner (`node:test`, `assert/strict`) with `tsx` as the loader. Tests import source as `../src/.../*.js` — keep the `.js` specifier even for `.ts` files (ESM NodeNext requirement).
+
+- `runtime-foundation.test.ts` — canonical router/session integration, directive routing, project alias canonicalization, `/list` / `/running` / `/resume` branches
+- `codex-adapter.test.ts`, `claude-adapter.test.ts`, `gemini-adapter.test.ts` — per-agent run lifecycle exercised through a `fake-<agent>.mjs` script written to a temp dir (no real CLI calls)
+- `project-registry.test.ts` — alias resolution and conflict detection
+- `feishu-protocol.test.ts` — directive parsing including `/list /running /resume`
+- `load-config.test.ts` — `extends` merge and cycle rejection
+- `policy-engine.test.ts` — policy gates
+- `feishu-webhook.test.ts` — webhook-mode event parsing and verification token
