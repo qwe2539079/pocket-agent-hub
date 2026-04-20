@@ -97,6 +97,48 @@ test("session registry persists sessions to disk", async () => {
   assert.equal(hydrated.getLatestByActor("feishu", "user-1")?.id, "session-1");
 });
 
+test("router resolves project aliases and canonicalizes downstream records", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-alias-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+  const config = makeConfig();
+  const projects = [
+    {
+      ...config.projects[0],
+      aliases: ["hub"],
+    },
+  ];
+  const router = new HubRouter(
+    config,
+    new PolicyEngine(),
+    new Map([["claude", new EchoClaudeAdapter()]]),
+    sessions,
+    new ProjectRegistry(projects),
+    auditLog,
+  );
+
+  await router.route({
+    id: "alias-route",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "hello via alias",
+    targetAgent: "claude",
+    projectId: "hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  const session = sessions.getLatestForConversation("feishu", "user-1", "chat-1");
+  assert.equal(session?.projectId, "pocket-agent-hub");
+
+  const raw = await readFile(join(dir, "audit/events.jsonl"), "utf8");
+  assert.match(raw, /"projectId":"pocket-agent-hub"/);
+  assert.doesNotMatch(raw, /"projectId":"hub"/);
+});
+
 test("router rejects unknown projects and writes audit log for allowed routes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-router-"));
   const store = new FileStore(dir);

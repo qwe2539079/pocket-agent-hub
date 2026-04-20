@@ -45,6 +45,7 @@ export interface ProjectConfig {
   path: string;
   description: string;
   defaultAgent: AgentKind;
+  aliases?: string[];
 }
 
 export interface AppConfig {

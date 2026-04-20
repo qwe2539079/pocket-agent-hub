@@ -42,19 +42,25 @@ export class HubRouter {
       throw new Error(`Agent "${targetAgent}" is not allowed for persona "${resolved.persona}"`);
     }
 
-    if (resolved.projectId && !this.projects.get(resolved.projectId)) {
-      await this.auditLog.write({
-        id: resolved.id,
-        actorId: resolved.senderId,
-        channel: resolved.channel,
-        persona: resolved.persona,
-        targetAgent,
-        projectId: resolved.projectId,
-        action: "route",
-        result: "blocked",
-        timestamp: new Date().toISOString(),
-      });
-      throw new Error(`Unknown project "${resolved.projectId}"`);
+    if (resolved.projectId) {
+      const project = this.projects.get(resolved.projectId);
+      if (!project) {
+        await this.auditLog.write({
+          id: resolved.id,
+          actorId: resolved.senderId,
+          channel: resolved.channel,
+          persona: resolved.persona,
+          targetAgent,
+          projectId: resolved.projectId,
+          action: "route",
+          result: "blocked",
+          timestamp: new Date().toISOString(),
+        });
+        throw new Error(`Unknown project "${resolved.projectId}"`);
+      }
+      // Canonicalize alias → real id so downstream audit/session/adapter
+      // see a single identity for the project.
+      resolved.projectId = project.id;
     }
 
     this.policyEngine.assertAllowed({
