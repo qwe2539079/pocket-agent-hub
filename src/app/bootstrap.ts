@@ -62,6 +62,17 @@ export async function bootstrap(configPath?: string): Promise<void> {
 
   await Promise.all(connectors.map((connector) => connector.start()));
 
+  console.log(`[hub] started on ${config.hostId}`);
+  console.log(`[hub] config: ${absoluteConfigPath}`);
+  console.log(`[hub] storage: ${storageDir}`);
+  console.log(`[hub] projects: ${projects.list().map((project) => project.id).join(", ")}`);
+  console.log(`[hub] restored sessions: ${sessions.list().length}`);
+
+  if (process.env.POCKET_AGENT_HUB_SKIP_WARMUP) {
+    console.log("[hub] warmup skipped (POCKET_AGENT_HUB_SKIP_WARMUP set)");
+    return;
+  }
+
   const warmup = await router.route({
     id: "boot-message",
     channel: "feishu",
@@ -72,12 +83,6 @@ export async function bootstrap(configPath?: string): Promise<void> {
     projectId: "pocket-agent-hub",
     timestamp: new Date().toISOString(),
   });
-
-  console.log(`[hub] started on ${config.hostId}`);
-  console.log(`[hub] config: ${absoluteConfigPath}`);
-  console.log(`[hub] storage: ${storageDir}`);
-  console.log(`[hub] projects: ${projects.list().map((project) => project.id).join(", ")}`);
-  console.log(`[hub] restored sessions: ${sessions.list().length}`);
   console.log(`[hub] warmup response: ${warmup.text}`);
 }
 

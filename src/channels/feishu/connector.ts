@@ -241,7 +241,6 @@ class FeishuWebSocketConnector extends FeishuBaseConnector {
       return;
     }
 
-    this.#started = true;
     this.#client = new Lark.WSClient({
       appId: this.config.appId,
       appSecret: this.config.appSecret,
@@ -259,7 +258,14 @@ class FeishuWebSocketConnector extends FeishuBaseConnector {
       },
     });
 
-    await this.#client.start({ eventDispatcher });
+    try {
+      await this.#client.start({ eventDispatcher });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[feishu] websocket connect failed: ${message}`);
+      throw error;
+    }
+    this.#started = true;
     console.log("[feishu] connected via official websocket client");
   }
 }
