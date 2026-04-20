@@ -58,7 +58,7 @@ Five explicit layers wired together in `src/app/bootstrap.ts`:
 2. `HubRouter.route()`:
    - Handles session commands (`/current`, `/reset`, `/new`, `/list`, `/running`, `/resume <run-id>`) first and returns immediately.
    - If the message has no directives, inherits `persona`/`targetAgent`/`projectId` from the latest session for this `(channel, sender, conversation)` (falling back to latest-by-actor). This is the "follow-up continues the active task" behavior — tests cover it in `tests/runtime-foundation.test.ts`.
-   - Validates the persona's `allowedAgents` and the project id (via `ProjectRegistry.get`, which accepts aliases), canonicalizes `message.projectId` to the real id, writes an `audit` event (`allowed`/`blocked`), runs `PolicyEngine.assertAllowed()`, then dispatches to the selected `AgentAdapter`.
+   - Validates and canonicalizes `message.projectId` via `ProjectRegistry.get` (accepts aliases). Agent selection order: `resolved.targetAgent` (from explicit directive or inherited session) → `project.defaultAgent` when the persona allows it → `personaConfig.allowedAgents[0]`. Then validates persona `allowedAgents` membership, writes an `audit` event (`allowed`/`blocked`), runs `PolicyEngine.assertAllowed()`, and dispatches to the selected `AgentAdapter`.
    - Upserts a session record keyed by the adapter's returned `sessionId` (adapters currently build this as `"<agentId>:<senderId>"`, which intentionally makes follow-ups share one session per sender).
 3. Adapter returns `HubResponse { sessionId, text, requiresApproval? }`; the connector renders it back (Feishu appends `Session: …` and optional approval notice via `renderFeishuReply`).
 

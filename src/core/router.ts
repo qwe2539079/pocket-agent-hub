@@ -1,4 +1,4 @@
-import type { AppConfig, AgentKind, PersonaKind } from "../config/types.js";
+import type { AppConfig, AgentKind, PersonaKind, ProjectConfig } from "../config/types.js";
 import type { PolicyEngine } from "../policies/policy-engine.js";
 import type { AuditLog } from "../storage/audit-log.js";
 import type { HubMessage, HubResponse } from "./message.js";
@@ -25,7 +25,38 @@ export class HubRouter {
 
     const resolved = this.resolveMessage(message);
     const personaConfig = this.config.personas[resolved.persona];
-    const targetAgent = resolved.targetAgent ?? personaConfig.allowedAgents[0];
+
+    // Resolve + canonicalize the project first so its defaultAgent can
+    // feed into the agent fallback below.
+    let project: ProjectConfig | undefined;
+    if (resolved.projectId) {
+      project = this.projects.get(resolved.projectId);
+      if (!project) {
+        await this.auditLog.write({
+          id: resolved.id,
+          actorId: resolved.senderId,
+          channel: resolved.channel,
+          persona: resolved.persona,
+          targetAgent: resolved.targetAgent ?? personaConfig.allowedAgents[0],
+          projectId: resolved.projectId,
+          action: "route",
+          result: "blocked",
+          timestamp: new Date().toISOString(),
+        });
+        throw new Error(`Unknown project "${resolved.projectId}"`);
+      }
+      resolved.projectId = project.id;
+    }
+
+    // Agent fallback order: explicit message / inherited session →
+    // project's defaultAgent (when persona allows it) → persona first.
+    let targetAgent = resolved.targetAgent;
+    if (!targetAgent && project && personaConfig.allowedAgents.includes(project.defaultAgent)) {
+      targetAgent = project.defaultAgent;
+    }
+    if (!targetAgent) {
+      targetAgent = personaConfig.allowedAgents[0];
+    }
 
     if (!personaConfig.allowedAgents.includes(targetAgent)) {
       await this.auditLog.write({
@@ -40,27 +71,6 @@ export class HubRouter {
         timestamp: new Date().toISOString(),
       });
       throw new Error(`Agent "${targetAgent}" is not allowed for persona "${resolved.persona}"`);
-    }
-
-    if (resolved.projectId) {
-      const project = this.projects.get(resolved.projectId);
-      if (!project) {
-        await this.auditLog.write({
-          id: resolved.id,
-          actorId: resolved.senderId,
-          channel: resolved.channel,
-          persona: resolved.persona,
-          targetAgent,
-          projectId: resolved.projectId,
-          action: "route",
-          result: "blocked",
-          timestamp: new Date().toISOString(),
-        });
-        throw new Error(`Unknown project "${resolved.projectId}"`);
-      }
-      // Canonicalize alias → real id so downstream audit/session/adapter
-      // see a single identity for the project.
-      resolved.projectId = project.id;
     }
 
     this.policyEngine.assertAllowed({

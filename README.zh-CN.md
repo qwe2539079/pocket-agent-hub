@@ -129,7 +129,7 @@ npm run dev:local
 - 运行历史：`/list`（最近的 run）、`/running`（当前运行中的 run）、`/resume <run-id>`（让下一条消息从该 run 的回复继续）
 - 桌面接管：`/desktop`（列出本机上的原生会话）、`/takeover <session-id>`（把某个桌面会话接管到当前手机对话；接管前请先在桌面终端关闭该会话，避免两端同时写同一份会话日志。当前仅支持 Claude）
 
-不带指令的消息会默认续接当前会话的最新 session。
+不带指令的消息会默认续接当前会话的最新 session。如果消息显式指定了 `/project <id-or-alias>` 但没指定 agent，会优先使用项目的 `defaultAgent`（前提是 persona 允许）；否则回退到 persona 允许的第一个 agent。
 
 项目别名与按 persona 的沙箱策略在配置里声明，详见下节。
 

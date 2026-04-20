@@ -129,7 +129,7 @@ Directives recognized in Feishu text:
 - run history: `/list` (recent runs), `/running` (currently running), `/resume <run-id>` (seed the next message from that run's reply)
 - desktop takeover: `/desktop` (list native agent sessions on the workstation), `/takeover <session-id>` (continue one of them from this chat — close the desktop session first to avoid concurrent writes; only Claude is supported so far)
 
-Messages without directives continue the latest active session for the conversation.
+Messages without directives continue the latest active session for the conversation. When a message picks a project (`/project <id-or-alias>`) but no agent, the project's `defaultAgent` is used (as long as the persona allows it); otherwise the first agent allowed by the persona.
 
 Project aliases and per-persona sandboxes are declared in the config — see the next section.
 

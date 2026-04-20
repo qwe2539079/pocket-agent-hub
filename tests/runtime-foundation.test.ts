@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { AppConfig } from "../src/config/types.js";
+import type { AgentKind, AppConfig } from "../src/config/types.js";
 import type { HubMessage, HubResponse } from "../src/core/message.js";
 import { ProjectRegistry } from "../src/core/project.js";
 import { HubRouter } from "../src/core/router.js";
@@ -95,6 +95,95 @@ test("session registry persists sessions to disk", async () => {
   assert.equal(hydrated.get("session-1")?.summary, "hello");
   assert.equal(hydrated.getLatestForConversation("feishu", "user-1", "chat-1")?.id, "session-1");
   assert.equal(hydrated.getLatestByActor("feishu", "user-1")?.id, "session-1");
+});
+
+test("router falls back to project.defaultAgent when persona allows it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-default-agent-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  const config = makeConfig();
+  // dev-control allows both agents; default [0] would be "codex", so to
+  // prove defaultAgent is really driving the choice we flip persona order
+  // and make the project prefer codex.
+  config.personas["dev-control"] = { allowedAgents: ["claude", "codex"], policy: "guarded-dev" };
+  const projects = [
+    { ...config.projects[0], defaultAgent: "codex" as const },
+  ];
+
+  class StubCodex implements AgentAdapter {
+    readonly id = "codex";
+    calls = 0;
+    async handle(message: HubMessage): Promise<HubResponse> {
+      this.calls += 1;
+      return { sessionId: `codex:${message.senderId}`, text: "codex handled" };
+    }
+  }
+
+  const codexStub = new StubCodex();
+  const router = new HubRouter(
+    config,
+    new PolicyEngine(),
+    new Map<AgentKind, AgentAdapter>([
+      ["claude", new EchoClaudeAdapter()],
+      ["codex", codexStub],
+    ]),
+    sessions,
+    new ProjectRegistry(projects),
+    auditLog,
+  );
+
+  await router.route({
+    id: "default-agent",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "dev-control",
+    text: "do something",
+    projectId: "pocket-agent-hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  assert.equal(codexStub.calls, 1);
+});
+
+test("router ignores project.defaultAgent when persona disallows it and uses persona's first allowed agent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-router-default-agent-fallback-"));
+  const store = new FileStore(dir);
+  const sessions = new SessionRegistry(store);
+  const auditLog = new AuditLog(store);
+
+  const config = makeConfig();
+  // daily-assistant allows only claude; project prefers codex — should fall
+  // back to claude without throwing.
+  const projects = [
+    { ...config.projects[0], defaultAgent: "codex" as const },
+  ];
+
+  const router = new HubRouter(
+    config,
+    new PolicyEngine(),
+    new Map([["claude", new EchoClaudeAdapter()]]),
+    sessions,
+    new ProjectRegistry(projects),
+    auditLog,
+  );
+
+  const result = await router.route({
+    id: "default-agent-fallback",
+    channel: "feishu",
+    senderId: "user-1",
+    conversationId: "chat-1",
+    persona: "daily-assistant",
+    text: "hello",
+    projectId: "pocket-agent-hub",
+    timestamp: new Date().toISOString(),
+    hasDirectives: true,
+  });
+
+  assert.match(result.text, /received daily-assistant message/);
 });
 
 test("router resolves project aliases and canonicalizes downstream records", async () => {
