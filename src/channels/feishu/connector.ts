@@ -109,6 +109,7 @@ abstract class FeishuBaseConnector implements ChannelConnector {
         msg_type: "text",
         content: JSON.stringify({ text }),
       }),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {
@@ -132,6 +133,7 @@ abstract class FeishuBaseConnector implements ChannelConnector {
         app_id: this.config.appId,
         app_secret: this.config.appSecret,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {
