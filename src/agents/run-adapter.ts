@@ -395,7 +395,11 @@ export abstract class RunAdapter implements AgentAdapter {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[${this.id}] failed to send completion notification: ${message}`);
+      console.error(
+        `[${this.id}] failed to send completion notification ` +
+          `(run=${run.id} actor=${run.actorId} channel=${run.channel}` +
+          `${run.conversationId ? ` conv=${run.conversationId}` : ""}): ${message}`,
+      );
     }
   }
 

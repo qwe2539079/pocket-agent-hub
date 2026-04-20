@@ -252,10 +252,16 @@ class FeishuWebSocketConnector extends FeishuBaseConnector {
 
     const eventDispatcher = new Lark.EventDispatcher({}).register({
       "im.message.receive_v1": async (data: FeishuWsEvent) => {
-        const parsed = parseFeishuWsMessage(data);
-        const replyText = await this.routeParsedMessage(parsed);
-        if (parsed && replyText) {
-          await this.sendTextMessage(parsed.chatId, replyText);
+        try {
+          const parsed = parseFeishuWsMessage(data);
+          const replyText = await this.routeParsedMessage(parsed);
+          if (parsed && replyText) {
+            await this.sendTextMessage(parsed.chatId, replyText);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const msgId = data?.message?.message_id ?? "unknown";
+          console.error(`[feishu] ws message handler error (msg=${msgId}): ${message}`);
         }
       },
     });
