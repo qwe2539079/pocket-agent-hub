@@ -3,7 +3,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import type { AgentConfig, AgentKind, ChannelKind } from "../config/types.js";
+import type {
+  AgentConfig,
+  AgentKind,
+  AgentSandboxMode,
+  ChannelKind,
+  PersonaConfig,
+  PersonaKind,
+} from "../config/types.js";
 import { ProjectRegistry } from "../core/project.js";
 import type { HubMessage, HubResponse } from "../core/message.js";
 import type { AgentAdapter, ListRunsOptions, RunSummary } from "../core/types.js";
@@ -41,6 +48,8 @@ export interface BuildArgsContext {
   prompt: string;
   projectPath: string;
   lastMessagePath: string;
+  /** Effective sandbox mode for this run after applying persona overrides. */
+  sandboxMode: AgentSandboxMode | undefined;
 }
 
 const STATUS_QUERY_KEYWORDS = [
@@ -63,6 +72,7 @@ export abstract class RunAdapter implements AgentAdapter {
     protected readonly projects: ProjectRegistry,
     protected readonly storageDir: string,
     protected readonly notifications: NotificationCenter,
+    protected readonly personas: Partial<Record<PersonaKind, PersonaConfig>> = {},
   ) {}
 
   /** Build the argv for the agent CLI. Called for every run. */
@@ -120,6 +130,7 @@ export abstract class RunAdapter implements AgentAdapter {
       project.path,
       message.text,
       executionPrompt,
+      message.persona,
     );
 
     return {
@@ -226,6 +237,7 @@ export abstract class RunAdapter implements AgentAdapter {
     projectPath: string,
     prompt: string,
     executionPrompt: string,
+    persona: PersonaKind,
   ): Promise<RunRecord> {
     const runId = `${Date.now()}`;
     const runDir = resolve(this.storageDir, this.id, sessionId, runId);
@@ -233,7 +245,8 @@ export abstract class RunAdapter implements AgentAdapter {
     const lastMessagePath = resolve(runDir, "last-message.txt");
     await mkdir(runDir, { recursive: true });
 
-    const args = await this.buildArgs({ prompt: executionPrompt, projectPath, lastMessagePath });
+    const sandboxMode = this.personas[persona]?.sandboxOverride ?? this.config.sandboxMode;
+    const args = await this.buildArgs({ prompt: executionPrompt, projectPath, lastMessagePath, sandboxMode });
     const now = new Date().toISOString();
     const run: RunRecord = {
       id: runId,

@@ -282,6 +282,47 @@ test("CodexAdapter.clearCurrent removes the pointer and is idempotent", async ()
   await adapter.clearCurrent("codex:user-1");
 });
 
+test("CodexAdapter applies per-persona sandboxOverride when building args", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pah-codex-sandbox-"));
+  const projectDir = join(dir, "repo");
+  await mkdir(projectDir, { recursive: true });
+  const commandPath = await writeFakeCodex(dir);
+  const notifications = new NotificationCenter();
+  const adapter = new CodexAdapter(
+    { enabled: true, command: commandPath, defaultProfile: "missing", sandboxMode: "danger-full-access" },
+    new ProjectRegistry([
+      { id: "demo", path: projectDir, description: "demo repo", defaultAgent: "codex" },
+    ]),
+    dir,
+    notifications,
+    {
+      "daily-assistant": { allowedAgents: ["codex"], policy: "safe-chat", sandboxOverride: "read-only" },
+      "dev-control": { allowedAgents: ["codex"], policy: "guarded-dev" },
+    },
+  );
+
+  const latestPath = join(dir, "codex", "codex:user-1", "latest.json");
+
+  await adapter.handle(makeMessage({ persona: "daily-assistant", text: "只读查询", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string };
+    return latest.status === "completed";
+  });
+  const daily = JSON.parse(await readFile(latestPath, "utf8")) as { args: string[] };
+  const dailySandboxIdx = daily.args.indexOf("--sandbox");
+  assert.equal(daily.args[dailySandboxIdx + 1], "read-only");
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await adapter.handle(makeMessage({ persona: "dev-control", text: "可写任务", hasDirectives: true }));
+  await waitFor(async () => {
+    const latest = JSON.parse(await readFile(latestPath, "utf8")) as { status: string; prompt: string };
+    return latest.status === "completed" && latest.prompt === "可写任务";
+  });
+  const dev = JSON.parse(await readFile(latestPath, "utf8")) as { args: string[] };
+  const devSandboxIdx = dev.args.indexOf("--sandbox");
+  assert.equal(dev.args[devSandboxIdx + 1], "danger-full-access");
+});
+
 test("CodexAdapter.reconcileZombieRuns marks interrupted runs as failed", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pah-codex-zombie-"));
   const projectDir = join(dir, "repo");

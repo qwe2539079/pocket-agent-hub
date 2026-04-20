@@ -11,14 +11,14 @@ export class CodexAdapter extends RunAdapter {
   #profileChecked = false;
   #profileAvailable = false;
 
-  protected async buildArgs({ prompt, projectPath, lastMessagePath }: BuildArgsContext): Promise<string[]> {
+  protected async buildArgs({ prompt, projectPath, lastMessagePath, sandboxMode }: BuildArgsContext): Promise<string[]> {
     const args = ["exec", "-C", projectPath];
 
     if (await this.hasConfiguredProfile()) {
       args.push("--profile", this.config.defaultProfile);
     }
 
-    args.push("--sandbox", this.config.sandboxMode ?? "danger-full-access");
+    args.push("--sandbox", sandboxMode ?? "danger-full-access");
     args.push("--output-last-message", lastMessagePath, prompt);
     return args;
   }

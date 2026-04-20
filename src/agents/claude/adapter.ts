@@ -7,9 +7,9 @@ import { RunAdapter, type BuildArgsContext } from "../run-adapter.js";
 export class ClaudeAdapter extends RunAdapter {
   readonly id: AgentKind = "claude";
 
-  protected async buildArgs({ prompt }: BuildArgsContext): Promise<string[]> {
+  protected async buildArgs({ prompt, sandboxMode }: BuildArgsContext): Promise<string[]> {
     const args = ["-p", "--output-format", "text"];
-    const permissionMode = mapSandboxToPermissionMode(this.config.sandboxMode);
+    const permissionMode = mapSandboxToPermissionMode(sandboxMode);
     if (permissionMode) {
       args.push("--permission-mode", permissionMode);
     }

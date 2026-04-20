@@ -31,9 +31,9 @@ export async function bootstrap(configPath?: string): Promise<void> {
   const notifications = new NotificationCenter();
 
   const agents = new Map<AgentKind, AgentAdapter>([
-    ["codex", new CodexAdapter(config.agents.codex, projects, storageDir, notifications)],
-    ["claude", new ClaudeAdapter(config.agents.claude, projects, storageDir, notifications)],
-    ["gemini", new GeminiAdapter(config.agents.gemini, projects, storageDir, notifications)],
+    ["codex", new CodexAdapter(config.agents.codex, projects, storageDir, notifications, config.personas)],
+    ["claude", new ClaudeAdapter(config.agents.claude, projects, storageDir, notifications, config.personas)],
+    ["gemini", new GeminiAdapter(config.agents.gemini, projects, storageDir, notifications, config.personas)],
   ]);
 
   for (const adapter of agents.values()) {

@@ -54,7 +54,8 @@
       "allowedAgents": [
         "claude"
       ],
-      "policy": "safe-chat"
+      "policy": "safe-chat",
+      "sandboxOverride": "read-only"
     }
   },
   "projects": [

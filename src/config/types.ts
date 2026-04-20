@@ -38,6 +38,7 @@ export interface AgentConfig {
 export interface PersonaConfig {
   allowedAgents: AgentKind[];
   policy: PolicyKind;
+  sandboxOverride?: AgentSandboxMode;
 }
 
 export interface ProjectConfig {
